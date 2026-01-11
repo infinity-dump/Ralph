@@ -39,6 +39,10 @@ if [[ -f "$MODULE_DIR/reviewer.sh" ]]; then
   # shellcheck source=./modules/reviewer.sh
   source "$MODULE_DIR/reviewer.sh"
 fi
+if [[ -f "$MODULE_DIR/git-guard.sh" ]]; then
+  # shellcheck source=./modules/git-guard.sh
+  source "$MODULE_DIR/git-guard.sh"
+fi
 
 extract_progress_patterns() {
   local progress_file="$1"
@@ -184,6 +188,13 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "Not a git repo. Initialize with: git init" >&2
     echo "Or run with RALPH_SKIP_GIT_CHECK=1 to bypass the Git check." >&2
     exit 1
+  fi
+fi
+
+if declare -F ralph_git_guard_enable >/dev/null 2>&1; then
+  ralph_git_guard_enable
+  if declare -F ralph_git_guard_cleanup >/dev/null 2>&1; then
+    trap 'ralph_git_guard_cleanup' EXIT
   fi
 fi
 

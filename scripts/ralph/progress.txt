@@ -10,6 +10,7 @@ Started: 2024-01-15
 - Ralph: PRD generator should fall back to template output when agent responses are missing or invalid
 - Ralph: Prompt templates should include fresh-context anchoring plus a per-iteration quality checklist
 - Ralph: Inject a per-iteration context header (git state, optional Codebase Patterns) when RALPH_CONTEXT_SUMMARY=1
+- Ralph: Git guard wraps git via PATH and blocks destructive commands unless bypassed
 - Migrations: IF NOT EXISTS
 - Types: Export from actions.ts
 
@@ -100,4 +101,15 @@ Started: 2024-01-15
   - Adversarial review should stay non-blocking while surfacing critique via a separate prompt.
 - **Gotchas:**
   - Ensure reviewer defaults to the main agent command unless RALPH_REVIEWER_CMD is set.
+---
+
+## 2026-01-11 - US-014
+- Implemented a git-guard module that wraps git to block destructive commands and honors bypass flags.
+- Wired git-guard into ralph.sh so it activates when RALPH_GIT_GUARD=1.
+- Files changed: scripts/ralph/modules/git-guard.sh, scripts/ralph/ralph.sh, scripts/ralph/prd.json, scripts/ralph/progress.txt
+- Typecheck/tests: not run (no test config found).
+- **Learnings:**
+  - Wrapping git via PATH is a simple way to guard agent-initiated commands.
+- **Gotchas:**
+  - Keep the guard permissive for non-destructive git usage so core loop status checks keep working.
 ---

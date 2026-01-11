@@ -437,7 +437,7 @@
         "RALPH_MAX_COST env var sets budget limit (requires API cost tracking)",
         "Iteration caps matched to task type (quick: 5, standard: 10, complex: 25)",
         "Rate limiting option via RALPH_RATE_LIMIT=N (iterations per minute)",
-        "Phase chaining: data \u2192 API \u2192 UI with verification between stages",
+        "Phase chaining: data → API → UI with verification between stages",
         "Cost estimate output at end of run"
       ],
       "passes": false,
@@ -484,13 +484,14 @@
         "Outputs clear warning when blocking",
         "Bypass with RALPH_GIT_GUARD_BYPASS=1 for intentional use"
       ],
-      "passes": false,
+      "passes": true,
       "effort": "small",
       "files": [
-        "scripts/ralph/modules/git-guard.sh"
+        "scripts/ralph/modules/git-guard.sh",
+        "scripts/ralph/ralph.sh"
       ],
       "dependencies": [],
-      "status": "pending"
+      "status": "completed"
     },
     {
       "id": "US-015",
