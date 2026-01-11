@@ -11,6 +11,10 @@ if [[ -f "$MODULE_DIR/circuit-breaker.sh" ]]; then
   # shellcheck source=./modules/circuit-breaker.sh
   source "$MODULE_DIR/circuit-breaker.sh"
 fi
+if [[ -f "$MODULE_DIR/quality-gates.sh" ]]; then
+  # shellcheck source=./modules/quality-gates.sh
+  source "$MODULE_DIR/quality-gates.sh"
+fi
 
 select_story() {
   if ! command -v jq >/dev/null 2>&1; then
@@ -191,27 +195,43 @@ EOF
     rm -f "$PROMPT_INPUT"
   fi
 
-  if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
-    HAS_PENDING=1
-    if command -v jq >/dev/null 2>&1; then
-      if jq -e '.userStories[] | select(.passes == false)' "$PRD_FILE" >/dev/null 2>&1; then
-        HAS_PENDING=1
-      else
-        HAS_PENDING=0
-      fi
+  QUALITY_FAILED=0
+  QUALITY_REASON=""
+  if declare -F ralph_quality_gates_run >/dev/null 2>&1; then
+    if ! ralph_quality_gates_run "$PRD_FILE" "${STORY_ID:-}"; then
+      QUALITY_FAILED=1
+      QUALITY_REASON="Quality gates failed in strict mode."
     fi
+  fi
 
-    if [[ "$HAS_PENDING" -eq 0 ]]; then
-      echo "Done!"
-      exit 0
+  if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
+    if [[ "$QUALITY_FAILED" -eq 1 ]]; then
+      echo "Ignoring COMPLETE because quality gates failed in strict mode." >&2
     else
-      echo "Ignoring COMPLETE because pending stories remain in $PRD_FILE" >&2
+      HAS_PENDING=1
+      if command -v jq >/dev/null 2>&1; then
+        if jq -e '.userStories[] | select(.passes == false)' "$PRD_FILE" >/dev/null 2>&1; then
+          HAS_PENDING=1
+        else
+          HAS_PENDING=0
+        fi
+      fi
+
+      if [[ "$HAS_PENDING" -eq 0 ]]; then
+        echo "Done!"
+        exit 0
+      else
+        echo "Ignoring COMPLETE because pending stories remain in $PRD_FILE" >&2
+      fi
     fi
   fi
 
   ITERATION_FAILED=0
   FAILURE_REASON=""
-  if [[ "$AGENT_EXIT" -ne 0 ]]; then
+  if [[ "$QUALITY_FAILED" -eq 1 ]]; then
+    ITERATION_FAILED=1
+    FAILURE_REASON="$QUALITY_REASON"
+  elif [[ "$AGENT_EXIT" -ne 0 ]]; then
     ITERATION_FAILED=1
     FAILURE_REASON="Agent command exited with status $AGENT_EXIT."
   elif [[ -n "${STORY_ID:-}" ]] && ! story_passed "$STORY_ID"; then

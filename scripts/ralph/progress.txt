@@ -2,6 +2,7 @@
 Started: 2024-01-15
 
 ## Codebase Patterns
+- Ralph: Quality gates are opt-in and only block when RALPH_QUALITY_GATES=strict; skip checks when tools/files are missing
 - Ralph: Circuit breaker module tracks iteration limits, consecutive failures, and stuck story retries
 - Ralph: Normalize story selection with jq (priority/status/dependencies) and fall back gracefully when jq is missing
 - Migrations: IF NOT EXISTS
@@ -26,4 +27,12 @@ Started: 2024-01-15
 - **Learnings:**
   - Use a temp prompt file and PIPESTATUS to capture agent output plus exit status reliably.
   - Reset stuck-story counters on successful iterations to avoid false escalations.
+---
+
+## 2026-01-11 - US-003
+- Implemented the quality gates module with language checks, PRD validation, and optional test auto-detection.
+- Files changed: scripts/ralph/modules/quality-gates.sh, scripts/ralph/ralph.sh, scripts/ralph/prd.json, scripts/ralph/progress.txt
+- **Learnings:**
+  - Keep quality gates non-blocking unless strict mode is explicitly enabled.
+  - Prefer local tool binaries (like node_modules/.bin/tsc) before falling back to global installs.
 ---
