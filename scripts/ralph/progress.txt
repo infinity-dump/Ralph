@@ -7,6 +7,7 @@ Started: 2024-01-15
 - Ralph: Normalize story selection with jq (priority/status/dependencies) and fall back gracefully when jq is missing
 - Ralph: Progress entries must include explicit Gotchas and still be logged on failures
 - Ralph: PRD generator should fall back to template output when agent responses are missing or invalid
+- Ralph: Prompt templates should include fresh-context anchoring plus a per-iteration quality checklist
 - Migrations: IF NOT EXISTS
 - Types: Export from actions.ts
 
@@ -55,4 +56,14 @@ Started: 2024-01-15
   - Validate agent-generated PRDs as JSON and fall back to a local template when invalid.
 - **Gotchas:**
   - Avoid nested heredoc delimiters that collide when embedding prompts.
+---
+
+## 2026-01-11 - US-017
+- Refreshed `prompt.md` with explicit workflow, fresh-context anchoring, and quality checklist guidance.
+- Added `templates/prompt-template.md` to keep new projects aligned with the improved prompt structure.
+- Files changed: scripts/ralph/prompt.md, scripts/ralph/templates/prompt-template.md, scripts/ralph/progress.txt, AGENTS.md, scripts/ralph/prd.json
+- **Learnings:**
+  - Prompt templates should mirror the runtime prompt to keep new setups consistent.
+- **Gotchas:**
+  - Use distinct heredoc delimiters when embedding examples to avoid shell parsing errors.
 ---
