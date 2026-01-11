@@ -22,8 +22,14 @@ APPEND to progress.txt:
 - Files changed
 - **Learnings:**
   - Patterns discovered
+- **Gotchas:**
   - Gotchas encountered
 ---
+
+Notes:
+- Use date format YYYY-MM-DD.
+- Always append an entry, even on failures; document what failed plus learnings/gotchas.
+- Keep the Codebase Patterns section at the very top and read it before starting work.
 
 ## Codebase Patterns
 

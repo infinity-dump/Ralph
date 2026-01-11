@@ -1,0 +1,16 @@
+# Ralph Progress Log
+Started: YYYY-MM-DD
+
+## Codebase Patterns
+- Add reusable patterns here
+
+---
+
+## YYYY-MM-DD - STORY-ID
+- What was implemented
+- Files changed
+- **Learnings:**
+  - Patterns discovered
+- **Gotchas:**
+  - Gotchas encountered
+---

@@ -5,6 +5,7 @@ Started: 2024-01-15
 - Ralph: Quality gates are opt-in and only block when RALPH_QUALITY_GATES=strict; skip checks when tools/files are missing
 - Ralph: Circuit breaker module tracks iteration limits, consecutive failures, and stuck story retries
 - Ralph: Normalize story selection with jq (priority/status/dependencies) and fall back gracefully when jq is missing
+- Ralph: Progress entries must include explicit Gotchas and still be logged on failures
 - Migrations: IF NOT EXISTS
 - Types: Export from actions.ts
 
@@ -35,4 +36,13 @@ Started: 2024-01-15
 - **Learnings:**
   - Keep quality gates non-blocking unless strict mode is explicitly enabled.
   - Prefer local tool binaries (like node_modules/.bin/tsc) before falling back to global installs.
+---
+
+## 2026-01-11 - US-005
+- Clarified progress.txt format to include explicit Gotchas and failure logging requirements.
+- Files changed: scripts/ralph/prompt.md, scripts/ralph/templates/progress-template.txt
+- **Learnings:**
+  - Include a dedicated Gotchas section for each progress entry.
+- **Gotchas:**
+  - Keep Codebase Patterns at the top of progress.txt to preserve cross-iteration memory.
 ---
