@@ -2,6 +2,7 @@
 Started: 2024-01-15
 
 ## Codebase Patterns
+- Ralph: Adversarial review runs when RALPH_ADVERSARIAL=1 and uses RALPH_REVIEWER_CMD or the main agent command.
 - Ralph: Quality gates are opt-in and only block when RALPH_QUALITY_GATES=strict; skip checks when tools/files are missing
 - Ralph: Circuit breaker module tracks iteration limits, consecutive failures, and stuck story retries
 - Ralph: Normalize story selection with jq (priority/status/dependencies) and fall back gracefully when jq is missing
@@ -88,4 +89,15 @@ Started: 2024-01-15
   - Capture plan output into `.ralph-plan.md` so the plan exists even if the agent doesn't save it explicitly.
 - **Gotchas:**
   - Manual approval needs a non-interactive escape hatch (env var or `.approved` file) to avoid blocking loop runs.
+---
+
+## 2026-01-11 - US-008
+- Added adversarial reviewer module and wired it into ralph.sh behind RALPH_ADVERSARIAL.
+- Reviewer uses a critic prompt, includes git status/diff stats, and honors RALPH_REVIEWER_CMD overrides.
+- Files changed: scripts/ralph/modules/reviewer.sh, scripts/ralph/ralph.sh, scripts/ralph/prd.json, scripts/ralph/progress.txt, AGENTS.md
+- Typecheck/tests: not run (no test config found).
+- **Learnings:**
+  - Adversarial review should stay non-blocking while surfacing critique via a separate prompt.
+- **Gotchas:**
+  - Ensure reviewer defaults to the main agent command unless RALPH_REVIEWER_CMD is set.
 ---

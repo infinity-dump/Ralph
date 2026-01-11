@@ -35,6 +35,10 @@ if [[ -f "$MODULE_DIR/planner.sh" ]]; then
   # shellcheck source=./modules/planner.sh
   source "$MODULE_DIR/planner.sh"
 fi
+if [[ -f "$MODULE_DIR/reviewer.sh" ]]; then
+  # shellcheck source=./modules/reviewer.sh
+  source "$MODULE_DIR/reviewer.sh"
+fi
 
 extract_progress_patterns() {
   local progress_file="$1"
@@ -160,6 +164,12 @@ AGENT_CMD=(codex exec --dangerously-bypass-approvals-and-sandbox)
 if [[ -n "${RALPH_AGENT_CMD:-}" ]]; then
   # shellcheck disable=SC2206
   AGENT_CMD=(${RALPH_AGENT_CMD})
+fi
+
+REVIEW_CMD=("${AGENT_CMD[@]}")
+if [[ -n "${RALPH_REVIEWER_CMD:-}" ]]; then
+  # shellcheck disable=SC2206
+  REVIEW_CMD=(${RALPH_REVIEWER_CMD})
 fi
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -306,6 +316,19 @@ EOF
     if ! ralph_quality_gates_run "$PRD_FILE" "${STORY_ID:-}"; then
       QUALITY_FAILED=1
       QUALITY_REASON="Quality gates failed in strict mode."
+    fi
+  fi
+
+  REVIEW_FAILED=0
+  REVIEW_REASON=""
+  if [[ "$AGENT_RAN" -eq 1 ]] \
+    && declare -F ralph_reviewer_enabled >/dev/null 2>&1 \
+    && ralph_reviewer_enabled \
+    && declare -F ralph_reviewer_run >/dev/null 2>&1; then
+    if ! ralph_reviewer_run "$ITERATION_CONTEXT" "$STORY_CONTEXT" "$OUTPUT" "${REVIEW_CMD[@]}"; then
+      REVIEW_FAILED=1
+      REVIEW_REASON="Reviewer command exited with status ${RALPH_REVIEW_EXIT:-unknown}."
+      echo "Adversarial review failed (non-blocking): $REVIEW_REASON" >&2
     fi
   fi
 
