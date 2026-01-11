@@ -79,3 +79,13 @@ Started: 2024-01-15
 - **Gotchas:**
   - Keep prompt templates in sync with prompt.md when adjusting injected context.
 ---
+
+## 2026-01-11 - US-007
+- Added a planning-phase module that writes `.ralph-plan.md`, supports optional self-review, and gates execution with manual approval.
+- Wired the planning phase into `ralph.sh` and documented the workflow in the prompt instructions/templates.
+- Files changed: scripts/ralph/modules/planner.sh, scripts/ralph/ralph.sh, scripts/ralph/prompt.md, scripts/ralph/templates/prompt-template.md, scripts/ralph/prd.json
+- **Learnings:**
+  - Capture plan output into `.ralph-plan.md` so the plan exists even if the agent doesn't save it explicitly.
+- **Gotchas:**
+  - Manual approval needs a non-interactive escape hatch (env var or `.approved` file) to avoid blocking loop runs.
+---

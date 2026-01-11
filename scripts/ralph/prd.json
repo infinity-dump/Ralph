@@ -326,14 +326,14 @@
         "Plan approval can be auto or manual via RALPH_PLAN_APPROVAL=auto|manual",
         "Planning phase separate from execution phase"
       ],
-      "passes": false,
+      "passes": true,
       "effort": "medium",
       "files": [
         "scripts/ralph/modules/planner.sh",
         "scripts/ralph/prompt.md"
       ],
       "dependencies": [],
-      "status": "pending"
+      "status": "completed"
     },
     {
       "id": "US-008",

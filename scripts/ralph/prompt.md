@@ -10,12 +10,22 @@ These instructions are agent-agnostic and work with Codex CLI or Claude Code.
 2. Read `scripts/ralph/progress.txt` (check Codebase Patterns first).
 3. Check you are on the correct branch.
 4. Pick the highest priority story where `passes: false`.
-5. Implement that ONE story (keep scope tight).
-6. Run typecheck and tests.
-7. Update AGENTS.md files with learnings.
-8. Commit: `feat: [ID] - [Title]`.
-9. Update prd.json: set `passes: true` for the story.
-10. Append learnings to progress.txt.
+5. If `RALPH_PLANNING_PHASE=1`, create `.ralph-plan.md` before coding:
+   - Include: Overview, Acceptance Criteria Coverage, Steps, Files to Touch, Tests/Checks, Risks/Gotchas.
+   - If `RALPH_PLAN_SELF_REVIEW=1`, add a "Self-Review" section.
+   - If `RALPH_PLAN_APPROVAL=manual`, stop after planning until approval (set `RALPH_PLAN_APPROVED=1`, add `Approved: yes` to the plan, or create `.ralph-plan.md.approved`).
+6. Implement that ONE story (keep scope tight).
+7. Run typecheck and tests.
+8. Update AGENTS.md files with learnings.
+9. Commit: `feat: [ID] - [Title]`.
+10. Update prd.json: set `passes: true` for the story.
+11. Append learnings to progress.txt.
+
+## Planning Phase (When Enabled)
+
+- Planning and execution are separate phases. Do not implement code until the plan is complete.
+- The plan must map each acceptance criterion to planned steps or note gaps.
+- Default approval mode is `auto`. Manual approval gates execution until explicitly approved.
 
 ## Fresh Context Anchoring
 

@@ -31,6 +31,10 @@ if [[ -f "$MODULE_DIR/quality-gates.sh" ]]; then
   # shellcheck source=./modules/quality-gates.sh
   source "$MODULE_DIR/quality-gates.sh"
 fi
+if [[ -f "$MODULE_DIR/planner.sh" ]]; then
+  # shellcheck source=./modules/planner.sh
+  source "$MODULE_DIR/planner.sh"
+fi
 
 extract_progress_patterns() {
   local progress_file="$1"
@@ -239,32 +243,66 @@ EOF
   fi
 
   ITERATION_CONTEXT="$(build_iteration_context "$i" "$MAX_ITERATIONS" "$ITERATION_TS")"
-  PROMPT_INPUT="$(mktemp)"
-  {
-    printf "%s\n\n" "$ITERATION_CONTEXT"
-    if [[ -n "$STORY_CONTEXT" ]]; then
-      printf "%s" "$STORY_CONTEXT"
+
+  PLAN_PENDING=0
+  PLAN_FAILED=0
+  PLAN_STATUS=0
+  if declare -F ralph_planner_enabled >/dev/null 2>&1 && ralph_planner_enabled; then
+    echo "Planning phase enabled."
+    ralph_planner_run "$PROMPT_FILE" "$ITERATION_CONTEXT" "$STORY_CONTEXT" "${AGENT_CMD[@]}"
+    PLAN_STATUS=$?
+    if [[ "$PLAN_STATUS" -eq 2 ]]; then
+      PLAN_PENDING=1
+    elif [[ "$PLAN_STATUS" -ne 0 ]]; then
+      PLAN_FAILED=1
     fi
-    cat "$PROMPT_FILE"
-  } > "$PROMPT_INPUT"
+  fi
 
-  OUTPUT_FILE="$(mktemp)"
-  set +e
-  cat "$PROMPT_INPUT" | "${AGENT_CMD[@]}" - 2>&1 \
-    | tee /dev/stderr \
-    | tee "$OUTPUT_FILE"
-  PIPE_STATUS=("${PIPESTATUS[@]}")
-  set -e
+  if [[ "$PLAN_PENDING" -eq 1 ]]; then
+    PLAN_FILE_DISPLAY="${RALPH_PLAN_FILE:-.ralph-plan.md}"
+    if declare -F ralph_planner_plan_file >/dev/null 2>&1; then
+      PLAN_FILE_DISPLAY="$(ralph_planner_plan_file)"
+    fi
+    echo "Plan awaiting manual approval. Review ${PLAN_FILE_DISPLAY} and re-run with RALPH_PLAN_APPROVED=1, add Approved: yes (or ${PLAN_FILE_DISPLAY}.approved), or set RALPH_PLAN_APPROVAL=auto."
+    exit 0
+  fi
 
-  AGENT_EXIT="${PIPE_STATUS[1]:-0}"
-  OUTPUT="$(cat "$OUTPUT_FILE")"
+  AGENT_RAN=0
+  AGENT_EXIT=0
+  OUTPUT=""
 
-  rm -f "$OUTPUT_FILE"
-  rm -f "$PROMPT_INPUT"
+  if [[ "$PLAN_FAILED" -eq 0 ]]; then
+    PROMPT_INPUT="$(mktemp)"
+    {
+      printf "%s\n\n" "$ITERATION_CONTEXT"
+      if [[ -n "$STORY_CONTEXT" ]]; then
+        printf "%s" "$STORY_CONTEXT"
+      fi
+      cat "$PROMPT_FILE"
+    } > "$PROMPT_INPUT"
+
+    OUTPUT_FILE="$(mktemp)"
+    set +e
+    cat "$PROMPT_INPUT" | "${AGENT_CMD[@]}" - 2>&1 \
+      | tee /dev/stderr \
+      | tee "$OUTPUT_FILE"
+    PIPE_STATUS=("${PIPESTATUS[@]}")
+    set -e
+
+    AGENT_EXIT="${PIPE_STATUS[1]:-0}"
+    OUTPUT="$(cat "$OUTPUT_FILE")"
+
+    rm -f "$OUTPUT_FILE"
+    rm -f "$PROMPT_INPUT"
+    AGENT_RAN=1
+  else
+    AGENT_EXIT="${RALPH_PLAN_EXIT:-1}"
+    OUTPUT="${RALPH_PLAN_OUTPUT:-}"
+  fi
 
   QUALITY_FAILED=0
   QUALITY_REASON=""
-  if declare -F ralph_quality_gates_run >/dev/null 2>&1; then
+  if [[ "$AGENT_RAN" -eq 1 ]] && declare -F ralph_quality_gates_run >/dev/null 2>&1; then
     if ! ralph_quality_gates_run "$PRD_FILE" "${STORY_ID:-}"; then
       QUALITY_FAILED=1
       QUALITY_REASON="Quality gates failed in strict mode."
