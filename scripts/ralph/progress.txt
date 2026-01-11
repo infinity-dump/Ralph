@@ -6,6 +6,7 @@ Started: 2024-01-15
 - Ralph: Circuit breaker module tracks iteration limits, consecutive failures, and stuck story retries
 - Ralph: Normalize story selection with jq (priority/status/dependencies) and fall back gracefully when jq is missing
 - Ralph: Progress entries must include explicit Gotchas and still be logged on failures
+- Ralph: PRD generator should fall back to template output when agent responses are missing or invalid
 - Migrations: IF NOT EXISTS
 - Types: Export from actions.ts
 
@@ -45,4 +46,13 @@ Started: 2024-01-15
   - Include a dedicated Gotchas section for each progress entry.
 - **Gotchas:**
   - Keep Codebase Patterns at the top of progress.txt to preserve cross-iteration memory.
+---
+
+## 2026-01-11 - US-006
+- Implemented a PRD generator module with template-based story breakdown and optional agent-assisted generation.
+- Files changed: scripts/ralph/modules/prd-generator.sh, scripts/ralph/ralph.sh, scripts/ralph/prd.json, scripts/ralph/progress.txt, AGENTS.md
+- **Learnings:**
+  - Validate agent-generated PRDs as JSON and fall back to a local template when invalid.
+- **Gotchas:**
+  - Avoid nested heredoc delimiters that collide when embedding prompts.
 ---

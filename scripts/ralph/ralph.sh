@@ -1,11 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MAX_ITERATIONS_ARG="${1:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROMPT_FILE="${PROMPT_FILE:-$SCRIPT_DIR/prompt.md}"
 PRD_FILE="${PRD_FILE:-$SCRIPT_DIR/prd.json}"
 MODULE_DIR="$SCRIPT_DIR/modules"
+
+if [[ "${1:-}" == "generate-prd" ]]; then
+  shift
+  if [[ -f "$MODULE_DIR/prd-generator.sh" ]]; then
+    # shellcheck source=./modules/prd-generator.sh
+    source "$MODULE_DIR/prd-generator.sh"
+  else
+    echo "Missing module: $MODULE_DIR/prd-generator.sh" >&2
+    exit 1
+  fi
+
+  ralph_prd_generator_main "$PRD_FILE" "$@"
+  exit $?
+fi
+
+MAX_ITERATIONS_ARG="${1:-}"
 
 if [[ -f "$MODULE_DIR/circuit-breaker.sh" ]]; then
   # shellcheck source=./modules/circuit-breaker.sh

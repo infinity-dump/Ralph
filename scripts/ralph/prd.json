@@ -303,14 +303,14 @@
         "Optional: AI-assisted breakdown via agent call",
         "Enabled via: ralph.sh generate-prd 'Feature description'"
       ],
-      "passes": false,
+      "passes": true,
       "effort": "medium",
       "files": [
         "scripts/ralph/modules/prd-generator.sh",
         "scripts/ralph/ralph.sh"
       ],
       "dependencies": [],
-      "status": "pending"
+      "status": "completed"
     },
     {
       "id": "US-007",
