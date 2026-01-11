@@ -372,14 +372,14 @@
         "Results merged back to main branch on completion",
         "Coordination via file locks or simple messaging"
       ],
-      "passes": false,
+      "passes": true,
       "effort": "large",
       "files": [
         "scripts/ralph/modules/parallel.sh",
         "scripts/ralph/ralph.sh"
       ],
       "dependencies": [],
-      "status": "pending"
+      "status": "completed"
     },
     {
       "id": "US-010",
@@ -437,7 +437,7 @@
         "RALPH_MAX_COST env var sets budget limit (requires API cost tracking)",
         "Iteration caps matched to task type (quick: 5, standard: 10, complex: 25)",
         "Rate limiting option via RALPH_RATE_LIMIT=N (iterations per minute)",
-        "Phase chaining: data → API → UI with verification between stages",
+        "Phase chaining: data \u2192 API \u2192 UI with verification between stages",
         "Cost estimate output at end of run"
       ],
       "passes": false,

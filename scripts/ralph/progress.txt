@@ -2,6 +2,7 @@
 Started: 2024-01-15
 
 ## Codebase Patterns
+- Ralph: Parallel mode uses git worktrees plus per-story locks and a merge lock to coordinate concurrent stories.
 - Ralph: Adversarial review runs when RALPH_ADVERSARIAL=1 and uses RALPH_REVIEWER_CMD or the main agent command.
 - Ralph: Quality gates are opt-in and only block when RALPH_QUALITY_GATES=strict; skip checks when tools/files are missing
 - Ralph: Circuit breaker module tracks iteration limits, consecutive failures, and stuck story retries
@@ -112,4 +113,15 @@ Started: 2024-01-15
   - Wrapping git via PATH is a simple way to guard agent-initiated commands.
 - **Gotchas:**
   - Keep the guard permissive for non-destructive git usage so core loop status checks keep working.
+---
+
+## 2026-01-12 - US-009
+- Implemented parallel execution via git worktrees with per-story locks, status tracking, and merge coordination.
+- Wired RALPH_PARALLEL to launch parallel worktrees and added single-story targeting for worker runs.
+- Files changed: scripts/ralph/modules/parallel.sh, scripts/ralph/ralph.sh, scripts/ralph/prd.json, scripts/ralph/progress.txt, AGENTS.md
+- Typecheck/tests: bash -n scripts/ralph/ralph.sh scripts/ralph/modules/parallel.sh
+- **Learnings:**
+  - Use per-story lock dirs plus a merge lock to avoid concurrent worktree/merge conflicts.
+- **Gotchas:**
+  - Parallel workers must disable RALPH_PARALLEL and run in single-story mode to avoid recursive worktree spawning.
 ---

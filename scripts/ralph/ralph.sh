@@ -43,6 +43,10 @@ if [[ -f "$MODULE_DIR/git-guard.sh" ]]; then
   # shellcheck source=./modules/git-guard.sh
   source "$MODULE_DIR/git-guard.sh"
 fi
+if [[ -f "$MODULE_DIR/parallel.sh" ]]; then
+  # shellcheck source=./modules/parallel.sh
+  source "$MODULE_DIR/parallel.sh"
+fi
 
 extract_progress_patterns() {
   local progress_file="$1"
@@ -91,6 +95,44 @@ build_iteration_context() {
 
 select_story() {
   if ! command -v jq >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local target_story="${RALPH_STORY_ID:-${RALPH_TARGET_STORY:-}}"
+  if [[ -n "$target_story" ]]; then
+    jq -c --arg id "$target_story" '
+      def normalized_status:
+        if .passes == true then "completed"
+        elif .status then .status
+        else "pending"
+        end;
+      def normalized_priority:
+        if (.priority | type) == "number" then .priority
+        elif (.priority | type) == "string" then
+          if .priority == "high" then 1
+          elif .priority == "medium" then 5
+          elif .priority == "low" then 9
+          else 5 end
+        else 5 end
+        | if . < 1 then 1 elif . > 10 then 10 else . end;
+      def dependencies_list:
+        if (.dependencies | type) == "array" then .dependencies else [] end;
+
+      . as $root
+      | ($root.userStories // []) as $stories
+      | $stories
+      | to_entries
+      | map(.value as $story
+          | {
+              story: $story,
+              index: .key,
+              status: ($story | normalized_status),
+              priority: ($story | normalized_priority),
+              dependencies: ($story | dependencies_list)
+            })
+      | map(select(.story.id == $id))
+      | .[0] // empty
+    ' "$PRD_FILE" 2>/dev/null || true
     return 0
   fi
 
@@ -162,6 +204,17 @@ detect_model_name() {
   fi
 }
 
+ralph_single_story_enabled() {
+  case "${RALPH_SINGLE_STORY:-}" in
+    1|true|TRUE|yes|YES)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 # Default agent command; override via RALPH_AGENT_CMD.
 # Use codex exec for non-interactive (headless) runs.
 AGENT_CMD=(codex exec --dangerously-bypass-approvals-and-sandbox)
@@ -191,6 +244,12 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   fi
 fi
 
+TARGET_STORY="${RALPH_STORY_ID:-${RALPH_TARGET_STORY:-}}"
+if [[ -n "$TARGET_STORY" ]] && ! command -v jq >/dev/null 2>&1; then
+  echo "Targeted story selection requires jq (RALPH_STORY_ID=$TARGET_STORY)." >&2
+  exit 1
+fi
+
 if declare -F ralph_git_guard_enable >/dev/null 2>&1; then
   ralph_git_guard_enable
   if declare -F ralph_git_guard_cleanup >/dev/null 2>&1; then
@@ -205,6 +264,25 @@ if declare -F ralph_circuit_breaker_init >/dev/null 2>&1; then
   MAX_ITERATIONS="$RALPH_CB_MAX_ITERATIONS"
 else
   MAX_ITERATIONS="${MAX_ITERATIONS_ARG:-${MAX_ITERATIONS:-10}}"
+fi
+
+SINGLE_STORY_MODE=0
+if ralph_single_story_enabled; then
+  SINGLE_STORY_MODE=1
+fi
+
+if declare -F ralph_parallel_enabled >/dev/null 2>&1 && ralph_parallel_enabled; then
+  echo "Parallel execution enabled."
+  if declare -F ralph_parallel_run >/dev/null 2>&1; then
+    if ralph_parallel_run "$PRD_FILE"; then
+      exit 0
+    else
+      exit 1
+    fi
+  else
+    echo "Parallel module not available; disable RALPH_PARALLEL or add modules/parallel.sh." >&2
+    exit 1
+  fi
 fi
 
 echo "Starting Ralph (max iterations: $MAX_ITERATIONS)"
@@ -260,6 +338,25 @@ ${STORY_JSON:-}
 
 EOF
       )
+    fi
+  fi
+
+  if [[ -n "$TARGET_STORY" ]]; then
+    if [[ -z "$STORY_ID" ]]; then
+      if story_passed "$TARGET_STORY"; then
+        echo "Target story ${TARGET_STORY} already completed."
+        exit 0
+      fi
+      echo "Target story ${TARGET_STORY} not found or not selectable." >&2
+      exit 1
+    fi
+    if [[ "$STORY_STATUS" == "completed" ]]; then
+      echo "Target story ${STORY_ID} already completed."
+      exit 0
+    fi
+    if [[ "$STORY_STATUS" == "blocked" ]]; then
+      echo "Target story ${STORY_ID} is blocked." >&2
+      exit 1
     fi
   fi
 
@@ -343,7 +440,7 @@ EOF
     fi
   fi
 
-  if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
+  if [[ "$SINGLE_STORY_MODE" -eq 0 ]] && echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
     if [[ "$QUALITY_FAILED" -eq 1 ]]; then
       echo "Ignoring COMPLETE because quality gates failed in strict mode." >&2
     else
@@ -388,6 +485,13 @@ EOF
 
     if ! ralph_circuit_breaker_should_stop "$i"; then
       exit 1
+    fi
+  fi
+
+  if [[ "$SINGLE_STORY_MODE" -eq 1 && -n "${STORY_ID:-}" ]]; then
+    if [[ "$ITERATION_FAILED" -eq 0 ]]; then
+      echo "Story ${STORY_ID} completed; exiting single-story mode."
+      exit 0
     fi
   fi
 
