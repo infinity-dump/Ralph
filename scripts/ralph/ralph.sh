@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MAX_ITERATIONS="${1:-10}"
+MAX_ITERATIONS_ARG="${1:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROMPT_FILE="${PROMPT_FILE:-$SCRIPT_DIR/prompt.md}"
 PRD_FILE="${PRD_FILE:-$SCRIPT_DIR/prd.json}"
+MODULE_DIR="$SCRIPT_DIR/modules"
+
+if [[ -f "$MODULE_DIR/circuit-breaker.sh" ]]; then
+  # shellcheck source=./modules/circuit-breaker.sh
+  source "$MODULE_DIR/circuit-breaker.sh"
+fi
 
 select_story() {
   if ! command -v jq >/dev/null 2>&1; then
@@ -52,6 +58,33 @@ select_story() {
   ' "$PRD_FILE" 2>/dev/null || true
 }
 
+story_passed() {
+  local story_id="$1"
+
+  if [[ -z "$story_id" ]]; then
+    return 1
+  fi
+
+  if ! command -v jq >/dev/null 2>&1; then
+    return 1
+  fi
+
+  jq -e --arg id "$story_id" \
+    '.userStories[] | select(.id == $id) | .passes == true' \
+    "$PRD_FILE" >/dev/null 2>&1
+}
+
+detect_model_name() {
+  if [[ -n "${RALPH_AGENT:-}" ]]; then
+    echo "$RALPH_AGENT"
+    return
+  fi
+
+  if [[ -n "${AGENT_CMD[0]:-}" ]]; then
+    basename "${AGENT_CMD[0]}"
+  fi
+}
+
 # Default agent command; override via RALPH_AGENT_CMD.
 # Use codex exec for non-interactive (headless) runs.
 AGENT_CMD=(codex exec --dangerously-bypass-approvals-and-sandbox)
@@ -75,10 +108,22 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   fi
 fi
 
-echo "Starting Ralph"
+if declare -F ralph_circuit_breaker_init >/dev/null 2>&1; then
+  ralph_circuit_breaker_init "$MAX_ITERATIONS_ARG"
+  MODEL_NAME="$(detect_model_name)"
+  ralph_circuit_breaker_apply_model_limit "$MODEL_NAME"
+  MAX_ITERATIONS="$RALPH_CB_MAX_ITERATIONS"
+else
+  MAX_ITERATIONS="${MAX_ITERATIONS_ARG:-${MAX_ITERATIONS:-10}}"
+fi
+
+echo "Starting Ralph (max iterations: $MAX_ITERATIONS)"
 
 for i in $(seq 1 "$MAX_ITERATIONS"); do
   echo "=== Iteration $i ==="
+  if declare -F ralph_circuit_breaker_warn_if_needed >/dev/null 2>&1; then
+    ralph_circuit_breaker_warn_if_needed "$i"
+  fi
 
   if [[ ! -f "$PROMPT_FILE" ]]; then
     echo "Missing prompt file: $PROMPT_FILE" >&2
@@ -90,6 +135,8 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
   fi
 
   STORY_CONTEXT=""
+  STORY_ID=""
+  STORY_TITLE=""
   STORY_SELECTION="$(select_story)"
   if [[ -n "$STORY_SELECTION" ]]; then
     STORY_JSON="$(jq -c '.story' <<<"$STORY_SELECTION" 2>/dev/null || true)"
@@ -119,15 +166,29 @@ EOF
 
   # codex exec reads prompt content from stdin when passed "-" as the prompt arg.
   if [[ -n "$STORY_CONTEXT" ]]; then
-    OUTPUT=$(
-      {
-        printf "%s" "$STORY_CONTEXT"
-        cat "$PROMPT_FILE"
-      } | "${AGENT_CMD[@]}" - 2>&1 | tee /dev/stderr
-    ) || true
+    PROMPT_INPUT="$(mktemp)"
+    {
+      printf "%s" "$STORY_CONTEXT"
+      cat "$PROMPT_FILE"
+    } > "$PROMPT_INPUT"
   else
-    OUTPUT=$("${AGENT_CMD[@]}" - < "$PROMPT_FILE" 2>&1 \
-      | tee /dev/stderr) || true
+    PROMPT_INPUT="$PROMPT_FILE"
+  fi
+
+  OUTPUT_FILE="$(mktemp)"
+  set +e
+  cat "$PROMPT_INPUT" | "${AGENT_CMD[@]}" - 2>&1 \
+    | tee /dev/stderr \
+    | tee "$OUTPUT_FILE"
+  PIPE_STATUS=("${PIPESTATUS[@]}")
+  set -e
+
+  AGENT_EXIT="${PIPE_STATUS[1]:-0}"
+  OUTPUT="$(cat "$OUTPUT_FILE")"
+
+  rm -f "$OUTPUT_FILE"
+  if [[ "$PROMPT_INPUT" != "$PROMPT_FILE" ]]; then
+    rm -f "$PROMPT_INPUT"
   fi
 
   if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
@@ -148,8 +209,34 @@ EOF
     fi
   fi
 
+  ITERATION_FAILED=0
+  FAILURE_REASON=""
+  if [[ "$AGENT_EXIT" -ne 0 ]]; then
+    ITERATION_FAILED=1
+    FAILURE_REASON="Agent command exited with status $AGENT_EXIT."
+  elif [[ -n "${STORY_ID:-}" ]] && ! story_passed "$STORY_ID"; then
+    ITERATION_FAILED=1
+    FAILURE_REASON="Story ${STORY_ID} still not marked as passed."
+  fi
+
+  if declare -F ralph_circuit_breaker_record_result >/dev/null 2>&1; then
+    ralph_circuit_breaker_record_result \
+      "$ITERATION_FAILED" \
+      "${STORY_ID:-}" \
+      "${STORY_TITLE:-}" \
+      "$AGENT_EXIT" \
+      "$FAILURE_REASON"
+
+    if ! ralph_circuit_breaker_should_stop "$i"; then
+      exit 1
+    fi
+  fi
+
   sleep 2
 done
 
+if declare -F ralph_circuit_breaker_report >/dev/null 2>&1; then
+  ralph_circuit_breaker_report "max_iterations" "$MAX_ITERATIONS"
+fi
 echo "Max iterations reached"
 exit 1

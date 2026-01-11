@@ -2,6 +2,7 @@
 Started: 2024-01-15
 
 ## Codebase Patterns
+- Ralph: Circuit breaker module tracks iteration limits, consecutive failures, and stuck story retries
 - Ralph: Normalize story selection with jq (priority/status/dependencies) and fall back gracefully when jq is missing
 - Migrations: IF NOT EXISTS
 - Types: Export from actions.ts
@@ -17,4 +18,12 @@ Started: 2024-01-15
 - **Learnings:**
   - Normalize legacy priority strings to numeric values for backward compatibility.
   - Guard jq usage so the loop still runs when jq is unavailable.
+---
+
+## 2026-01-11 - US-002
+- Implemented circuit breakers for iteration limits, consecutive failures, warnings, and stuck-story detection.
+- Files changed: scripts/ralph/ralph.sh, scripts/ralph/modules/circuit-breaker.sh, scripts/ralph/prd.json, scripts/ralph/progress.txt
+- **Learnings:**
+  - Use a temp prompt file and PIPESTATUS to capture agent output plus exit status reliably.
+  - Reset stuck-story counters on successful iterations to avoid false escalations.
 ---
