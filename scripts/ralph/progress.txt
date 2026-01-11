@@ -2,10 +2,19 @@
 Started: 2024-01-15
 
 ## Codebase Patterns
+- Ralph: Normalize story selection with jq (priority/status/dependencies) and fall back gracefully when jq is missing
 - Migrations: IF NOT EXISTS
 - Types: Export from actions.ts
 
 ## Key Files
 - db/schema.ts
 - app/auth/actions.ts
+---
+
+## 2026-01-11 - US-001
+- Implemented priority/status/dependency-aware story selection in `ralph.sh` and injected the selected story into the prompt.
+- Updated `prd.json` stories to use numeric priority, dependencies arrays, and status fields.
+- **Learnings:**
+  - Normalize legacy priority strings to numeric values for backward compatibility.
+  - Guard jq usage so the loop still runs when jq is unavailable.
 ---
