@@ -125,3 +125,14 @@ Started: 2024-01-15
 - **Gotchas:**
   - Parallel workers must disable RALPH_PARALLEL and run in single-story mode to avoid recursive worktree spawning.
 ---
+
+## 2026-01-12 - US-010
+- Implemented checkpoint persistence to `.ralph-checkpoint.json` with failure metadata and resume support.
+- Wired RALPH_CHECKPOINT auto-checkpointing, --resume handling, and checkpoint cleanup on successful completion.
+- Files changed: scripts/ralph/modules/checkpoint.sh, scripts/ralph/ralph.sh, scripts/ralph/prd.json, scripts/ralph/progress.txt, AGENTS.md
+- Typecheck/tests: bash -n scripts/ralph/ralph.sh scripts/ralph/modules/checkpoint.sh
+- **Learnings:**
+  - Checkpoint writes should escape JSON without requiring jq so resume works in minimal environments.
+- **Gotchas:**
+  - Avoid nested heredoc delimiter collisions when embedding JSON writers in shell modules.
+---

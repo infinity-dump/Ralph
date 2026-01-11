@@ -21,6 +21,12 @@ if [[ "${1:-}" == "generate-prd" ]]; then
   exit $?
 fi
 
+RESUME=0
+if [[ "${1:-}" == "--resume" ]]; then
+  RESUME=1
+  shift
+fi
+
 MAX_ITERATIONS_ARG="${1:-}"
 
 if [[ -f "$MODULE_DIR/circuit-breaker.sh" ]]; then
@@ -46,6 +52,10 @@ fi
 if [[ -f "$MODULE_DIR/parallel.sh" ]]; then
   # shellcheck source=./modules/parallel.sh
   source "$MODULE_DIR/parallel.sh"
+fi
+if [[ -f "$MODULE_DIR/checkpoint.sh" ]]; then
+  # shellcheck source=./modules/checkpoint.sh
+  source "$MODULE_DIR/checkpoint.sh"
 fi
 
 extract_progress_patterns() {
@@ -285,9 +295,57 @@ if declare -F ralph_parallel_enabled >/dev/null 2>&1 && ralph_parallel_enabled; 
   fi
 fi
 
+START_ITERATION=1
+LAST_COMPLETED_STORY_ID=""
+LAST_COMPLETED_STORY_TITLE=""
+FAILURE_TOTAL=0
+FAILURE_CONSECUTIVE=0
+LAST_FAILURE_REASON=""
+LAST_FAILURE_EXIT=0
+
+if [[ "$RESUME" -eq 1 ]]; then
+  if ! declare -F ralph_checkpoint_load >/dev/null 2>&1; then
+    echo "Checkpoint module not available; cannot resume." >&2
+    exit 1
+  fi
+
+  if ! ralph_checkpoint_load; then
+    exit 1
+  fi
+
+  START_ITERATION=$((RALPH_CHECKPOINT_ITERATION + 1))
+  LAST_COMPLETED_STORY_ID="${RALPH_CHECKPOINT_LAST_COMPLETED_ID:-}"
+  LAST_COMPLETED_STORY_TITLE="${RALPH_CHECKPOINT_LAST_COMPLETED_TITLE:-}"
+  FAILURE_TOTAL="${RALPH_CHECKPOINT_FAILURES_TOTAL:-0}"
+  FAILURE_CONSECUTIVE="${RALPH_CHECKPOINT_FAILURES_CONSECUTIVE:-0}"
+  LAST_FAILURE_REASON="${RALPH_CHECKPOINT_FAILURES_LAST_REASON:-}"
+  LAST_FAILURE_EXIT="${RALPH_CHECKPOINT_FAILURES_LAST_EXIT:-0}"
+
+  if [[ -n "${RALPH_CB_CONSECUTIVE_FAILURES+x}" ]]; then
+    RALPH_CB_CONSECUTIVE_FAILURES="$FAILURE_CONSECUTIVE"
+  fi
+  if [[ -n "${RALPH_CB_LAST_FAILURE_REASON+x}" ]]; then
+    RALPH_CB_LAST_FAILURE_REASON="$LAST_FAILURE_REASON"
+  fi
+  if [[ -n "${RALPH_CB_LAST_EXIT+x}" ]]; then
+    RALPH_CB_LAST_EXIT="$LAST_FAILURE_EXIT"
+  fi
+
+  if (( START_ITERATION > MAX_ITERATIONS )); then
+    echo "Checkpoint iteration ${RALPH_CHECKPOINT_ITERATION} exceeds max iterations (${MAX_ITERATIONS})." >&2
+    echo "Increase MAX_ITERATIONS or remove $(ralph_checkpoint_file)." >&2
+    exit 1
+  fi
+
+  echo "Resuming from checkpoint $(ralph_checkpoint_file) at iteration ${RALPH_CHECKPOINT_ITERATION}."
+  if [[ -n "$LAST_COMPLETED_STORY_ID" ]]; then
+    echo "Last completed story: ${LAST_COMPLETED_STORY_ID} ${LAST_COMPLETED_STORY_TITLE:+- $LAST_COMPLETED_STORY_TITLE}"
+  fi
+fi
+
 echo "Starting Ralph (max iterations: $MAX_ITERATIONS)"
 
-for i in $(seq 1 "$MAX_ITERATIONS"); do
+for i in $(seq "$START_ITERATION" "$MAX_ITERATIONS"); do
   ITERATION_TS="$(date +'%Y-%m-%d %H:%M:%S')"
   echo "=== Iteration $i / $MAX_ITERATIONS ($ITERATION_TS) ==="
   if declare -F ralph_circuit_breaker_warn_if_needed >/dev/null 2>&1; then
@@ -454,6 +512,9 @@ EOF
       fi
 
       if [[ "$HAS_PENDING" -eq 0 ]]; then
+        if declare -F ralph_checkpoint_clear >/dev/null 2>&1; then
+          ralph_checkpoint_clear
+        fi
         echo "Done!"
         exit 0
       else
@@ -475,6 +536,39 @@ EOF
     FAILURE_REASON="Story ${STORY_ID} still not marked as passed."
   fi
 
+  if [[ "$ITERATION_FAILED" -eq 1 ]]; then
+    FAILURE_TOTAL=$((FAILURE_TOTAL + 1))
+    FAILURE_CONSECUTIVE=$((FAILURE_CONSECUTIVE + 1))
+    LAST_FAILURE_REASON="$FAILURE_REASON"
+    LAST_FAILURE_EXIT="$AGENT_EXIT"
+  else
+    FAILURE_CONSECUTIVE=0
+    if [[ -n "${STORY_ID:-}" ]]; then
+      LAST_COMPLETED_STORY_ID="$STORY_ID"
+      LAST_COMPLETED_STORY_TITLE="$STORY_TITLE"
+    fi
+  fi
+
+  if declare -F ralph_checkpoint_enabled >/dev/null 2>&1 && ralph_checkpoint_enabled; then
+    if declare -F ralph_checkpoint_should_write >/dev/null 2>&1; then
+      if ralph_checkpoint_should_write "$i"; then
+        CHECKPOINT_TS="$(date +'%Y-%m-%d %H:%M:%S')"
+        ralph_checkpoint_write \
+          "$i" \
+          "$MAX_ITERATIONS" \
+          "${STORY_ID:-}" \
+          "${STORY_TITLE:-}" \
+          "$LAST_COMPLETED_STORY_ID" \
+          "$LAST_COMPLETED_STORY_TITLE" \
+          "$CHECKPOINT_TS" \
+          "$FAILURE_TOTAL" \
+          "$FAILURE_CONSECUTIVE" \
+          "$LAST_FAILURE_REASON" \
+          "$LAST_FAILURE_EXIT"
+      fi
+    fi
+  fi
+
   if declare -F ralph_circuit_breaker_record_result >/dev/null 2>&1; then
     ralph_circuit_breaker_record_result \
       "$ITERATION_FAILED" \
@@ -490,6 +584,9 @@ EOF
 
   if [[ "$SINGLE_STORY_MODE" -eq 1 && -n "${STORY_ID:-}" ]]; then
     if [[ "$ITERATION_FAILED" -eq 0 ]]; then
+      if declare -F ralph_checkpoint_clear >/dev/null 2>&1; then
+        ralph_checkpoint_clear
+      fi
       echo "Story ${STORY_ID} completed; exiting single-story mode."
       exit 0
     fi
