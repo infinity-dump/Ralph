@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROMPT_FILE="${PROMPT_FILE:-$SCRIPT_DIR/prompt.md}"
 PRD_FILE="${PRD_FILE:-$SCRIPT_DIR/prd.json}"
+PROGRESS_FILE="${PROGRESS_FILE:-$SCRIPT_DIR/progress.txt}"
 MODULE_DIR="$SCRIPT_DIR/modules"
 
 if [[ "${1:-}" == "generate-prd" ]]; then
@@ -30,6 +31,51 @@ if [[ -f "$MODULE_DIR/quality-gates.sh" ]]; then
   # shellcheck source=./modules/quality-gates.sh
   source "$MODULE_DIR/quality-gates.sh"
 fi
+
+extract_progress_patterns() {
+  local progress_file="$1"
+
+  if [[ ! -f "$progress_file" ]]; then
+    return 0
+  fi
+
+  awk '
+    BEGIN {found=0}
+    /^##[[:space:]]+Codebase Patterns/ {found=1; next}
+    found && /^##[[:space:]]+/ {exit}
+    found {print}
+  ' "$progress_file"
+}
+
+build_iteration_context() {
+  local iteration="$1"
+  local max_iterations="$2"
+  local timestamp="$3"
+  local git_branch
+  local git_sha
+  local git_status
+  local patterns_raw
+  local patterns
+
+  git_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  git_sha="$(git rev-parse --short HEAD 2>/dev/null || true)"
+  git_status="$(git -c color.status=false status -sb 2>/dev/null || true)"
+  patterns_raw="$(extract_progress_patterns "$PROGRESS_FILE")"
+
+  printf "%s\n" "# Ralph Iteration Context"
+  printf "Iteration: %s / %s\n" "$iteration" "$max_iterations"
+  printf "Timestamp: %s\n" "$timestamp"
+  printf "Git Branch: %s\n" "${git_branch:-unknown}"
+  printf "Git Commit: %s\n" "${git_sha:-unknown}"
+  printf "\nGit Status:\n%s\n\n" "${git_status:-Unavailable}"
+
+  if [[ "${RALPH_CONTEXT_SUMMARY:-}" == "1" ]]; then
+    patterns="$(printf "%s\n" "$patterns_raw" | sed '/^[[:space:]]*$/d')"
+    if [[ -n "$patterns" ]]; then
+      printf "Codebase Patterns (from progress.txt):\n%s\n\n" "$patterns"
+    fi
+  fi
+}
 
 select_story() {
   if ! command -v jq >/dev/null 2>&1; then
@@ -139,7 +185,8 @@ fi
 echo "Starting Ralph (max iterations: $MAX_ITERATIONS)"
 
 for i in $(seq 1 "$MAX_ITERATIONS"); do
-  echo "=== Iteration $i ==="
+  ITERATION_TS="$(date +'%Y-%m-%d %H:%M:%S')"
+  echo "=== Iteration $i / $MAX_ITERATIONS ($ITERATION_TS) ==="
   if declare -F ralph_circuit_breaker_warn_if_needed >/dev/null 2>&1; then
     ralph_circuit_breaker_warn_if_needed "$i"
   fi
@@ -152,10 +199,18 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
     echo "Missing prd file: $PRD_FILE" >&2
     exit 1
   fi
+  if [[ ! -f "$PROGRESS_FILE" ]]; then
+    echo "Missing progress file: $PROGRESS_FILE" >&2
+    exit 1
+  fi
 
   STORY_CONTEXT=""
   STORY_ID=""
   STORY_TITLE=""
+  STORY_PRIORITY=""
+  STORY_STATUS=""
+  STORY_DEPS=""
+  STORY_JSON=""
   STORY_SELECTION="$(select_story)"
   if [[ -n "$STORY_SELECTION" ]]; then
     STORY_JSON="$(jq -c '.story' <<<"$STORY_SELECTION" 2>/dev/null || true)"
@@ -183,16 +238,15 @@ EOF
     fi
   fi
 
-  # codex exec reads prompt content from stdin when passed "-" as the prompt arg.
-  if [[ -n "$STORY_CONTEXT" ]]; then
-    PROMPT_INPUT="$(mktemp)"
-    {
+  ITERATION_CONTEXT="$(build_iteration_context "$i" "$MAX_ITERATIONS" "$ITERATION_TS")"
+  PROMPT_INPUT="$(mktemp)"
+  {
+    printf "%s\n\n" "$ITERATION_CONTEXT"
+    if [[ -n "$STORY_CONTEXT" ]]; then
       printf "%s" "$STORY_CONTEXT"
-      cat "$PROMPT_FILE"
-    } > "$PROMPT_INPUT"
-  else
-    PROMPT_INPUT="$PROMPT_FILE"
-  fi
+    fi
+    cat "$PROMPT_FILE"
+  } > "$PROMPT_INPUT"
 
   OUTPUT_FILE="$(mktemp)"
   set +e
@@ -206,9 +260,7 @@ EOF
   OUTPUT="$(cat "$OUTPUT_FILE")"
 
   rm -f "$OUTPUT_FILE"
-  if [[ "$PROMPT_INPUT" != "$PROMPT_FILE" ]]; then
-    rm -f "$PROMPT_INPUT"
-  fi
+  rm -f "$PROMPT_INPUT"
 
   QUALITY_FAILED=0
   QUALITY_REASON=""

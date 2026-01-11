@@ -21,6 +21,7 @@ These instructions are agent-agnostic and work with Codex CLI or Claude Code.
 
 - Treat every iteration as a clean start: re-open prd.json, progress.txt, and git state.
 - Do not rely on cached memory of file contents; always re-read from disk.
+- Ralph may prepend a "Ralph Iteration Context" section with git status and optional Codebase Patterns when `RALPH_CONTEXT_SUMMARY=1`; treat it as authoritative for the current run.
 
 ## Quality Criteria (Must Be True Before Completion)
 

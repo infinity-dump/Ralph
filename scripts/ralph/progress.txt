@@ -8,6 +8,7 @@ Started: 2024-01-15
 - Ralph: Progress entries must include explicit Gotchas and still be logged on failures
 - Ralph: PRD generator should fall back to template output when agent responses are missing or invalid
 - Ralph: Prompt templates should include fresh-context anchoring plus a per-iteration quality checklist
+- Ralph: Inject a per-iteration context header (git state, optional Codebase Patterns) when RALPH_CONTEXT_SUMMARY=1
 - Migrations: IF NOT EXISTS
 - Types: Export from actions.ts
 
@@ -66,4 +67,15 @@ Started: 2024-01-15
   - Prompt templates should mirror the runtime prompt to keep new setups consistent.
 - **Gotchas:**
   - Use distinct heredoc delimiters when embedding examples to avoid shell parsing errors.
+---
+
+## 2026-01-11 - US-004
+- Added a per-iteration context header (timestamp, git state) and optional Codebase Patterns injection via RALPH_CONTEXT_SUMMARY=1.
+- Enforced progress.txt presence each iteration and updated prompt guidance to treat injected context as authoritative.
+- Files changed: scripts/ralph/ralph.sh, scripts/ralph/prompt.md, scripts/ralph/templates/prompt-template.md, scripts/ralph/progress.txt, AGENTS.md
+- Typecheck/tests: not run (no test config found).
+- **Learnings:**
+  - Fresh context is clearer when the loop prepends timestamped git status and optional patterns.
+- **Gotchas:**
+  - Keep prompt templates in sync with prompt.md when adjusting injected context.
 ---
