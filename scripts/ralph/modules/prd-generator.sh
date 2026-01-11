@@ -46,7 +46,7 @@ ralph_prd_generator_json_array() {
     local escaped
     escaped="$(ralph_prd_generator_json_escape "$item")"
     if [[ -n "$out" ]]; then
-      out+=" ,"
+      out+=", "
     fi
     out+="\"${escaped}\""
   done
