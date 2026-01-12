@@ -238,13 +238,100 @@ story_passed() {
 
 detect_model_name() {
   if [[ -n "${RALPH_AGENT:-}" ]]; then
-    echo "$RALPH_AGENT"
+    ralph_agent_normalize "$RALPH_AGENT"
     return
   fi
 
   if [[ -n "${AGENT_CMD[0]:-}" ]]; then
-    basename "${AGENT_CMD[0]}"
+    ralph_agent_normalize "$(basename "${AGENT_CMD[0]}")"
   fi
+}
+
+ralph_agent_normalize() {
+  local name="${1:-}"
+
+  name="$(echo "$name" | tr '[:upper:]' '[:lower:]')"
+  case "$name" in
+    "")
+      echo ""
+      ;;
+    codex*)
+      echo "codex"
+      ;;
+    claude*)
+      echo "claude"
+      ;;
+    aider*)
+      echo "aider"
+      ;;
+    custom)
+      echo "custom"
+      ;;
+    *)
+      echo "$name"
+      ;;
+  esac
+}
+
+ralph_agent_prompt_context() {
+  local agent="$1"
+
+  case "$agent" in
+    codex)
+      cat <<'EOF'
+# Agent Preset
+Agent: codex
+Notes: Running via Codex CLI in non-interactive mode.
+EOF
+      ;;
+    claude)
+      cat <<'EOF'
+# Agent Preset
+Agent: claude
+Notes: Running via Claude Code CLI in non-interactive mode.
+EOF
+      ;;
+    aider)
+      cat <<'EOF'
+# Agent Preset
+Agent: aider
+Notes: Running via Aider in batch mode; avoid interactive prompts.
+EOF
+      ;;
+  esac
+}
+
+ralph_agent_apply_preset() {
+  local preset="$1"
+
+  case "$preset" in
+    codex)
+      AGENT_CMD=(codex exec --dangerously-bypass-approvals-and-sandbox)
+      AGENT_INPUT_MODE="stdin"
+      AGENT_INPUT_ARG="-"
+      AGENT_SKIP_GIT_ARG="--skip-git-repo-check"
+      AGENT_PROMPT_CONTEXT="$(ralph_agent_prompt_context "codex")"
+      return 0
+      ;;
+    claude)
+      AGENT_CMD=(claude --dangerously-skip-permissions)
+      AGENT_INPUT_MODE="stdin"
+      AGENT_INPUT_ARG=""
+      AGENT_SKIP_GIT_ARG=""
+      AGENT_PROMPT_CONTEXT="$(ralph_agent_prompt_context "claude")"
+      return 0
+      ;;
+    aider)
+      AGENT_CMD=(aider --message-file)
+      AGENT_INPUT_MODE="file"
+      AGENT_INPUT_ARG=""
+      AGENT_SKIP_GIT_ARG=""
+      AGENT_PROMPT_CONTEXT="$(ralph_agent_prompt_context "aider")"
+      return 0
+      ;;
+  esac
+
+  return 1
 }
 
 ralph_register_exit_trap() {
@@ -276,12 +363,43 @@ ralph_single_story_enabled() {
   esac
 }
 
-# Default agent command; override via RALPH_AGENT_CMD.
+# Default agent command; override via RALPH_AGENT or RALPH_AGENT_CMD.
 # Use codex exec for non-interactive (headless) runs.
-AGENT_CMD=(codex exec --dangerously-bypass-approvals-and-sandbox)
+AGENT_CMD=()
+AGENT_INPUT_MODE="stdin"
+AGENT_INPUT_ARG="-"
+AGENT_SKIP_GIT_ARG=""
+AGENT_PROMPT_CONTEXT=""
+RALPH_AGENT_PRESET="$(ralph_agent_normalize "${RALPH_AGENT:-}")"
+
 if [[ -n "${RALPH_AGENT_CMD:-}" ]]; then
   # shellcheck disable=SC2206
   AGENT_CMD=(${RALPH_AGENT_CMD})
+  AGENT_INPUT_MODE="stdin"
+  AGENT_INPUT_ARG="-"
+  if [[ -n "$RALPH_AGENT_PRESET" ]]; then
+    AGENT_PROMPT_CONTEXT="$(ralph_agent_prompt_context "$RALPH_AGENT_PRESET")"
+  else
+    INFERRED_AGENT="$(ralph_agent_normalize "$(basename "${AGENT_CMD[0]}")")"
+    AGENT_PROMPT_CONTEXT="$(ralph_agent_prompt_context "$INFERRED_AGENT")"
+    if [[ "$INFERRED_AGENT" == "codex" ]]; then
+      AGENT_SKIP_GIT_ARG="--skip-git-repo-check"
+    fi
+  fi
+else
+  if [[ -z "$RALPH_AGENT_PRESET" ]]; then
+    RALPH_AGENT_PRESET="codex"
+  fi
+
+  if [[ "$RALPH_AGENT_PRESET" == "custom" ]]; then
+    echo "RALPH_AGENT=custom requires RALPH_AGENT_CMD to be set." >&2
+    exit 1
+  fi
+
+  if ! ralph_agent_apply_preset "$RALPH_AGENT_PRESET"; then
+    echo "Unknown RALPH_AGENT '$RALPH_AGENT'. Use codex|claude|aider|custom or set RALPH_AGENT_CMD." >&2
+    exit 1
+  fi
 fi
 
 REVIEW_CMD=("${AGENT_CMD[@]}")
@@ -291,16 +409,17 @@ if [[ -n "${RALPH_REVIEWER_CMD:-}" ]]; then
 fi
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  if [[ -n "${RALPH_AGENT_CMD:-}" ]]; then
-    echo "Not a git repo. Initialize with: git init" >&2
-    echo "Or include --skip-git-repo-check in RALPH_AGENT_CMD." >&2
-    exit 1
-  fi
   if [[ "${RALPH_SKIP_GIT_CHECK:-}" == "1" ]]; then
-    AGENT_CMD+=(--skip-git-repo-check)
+    if [[ -n "$AGENT_SKIP_GIT_ARG" ]]; then
+      AGENT_CMD+=("$AGENT_SKIP_GIT_ARG")
+    fi
   else
     echo "Not a git repo. Initialize with: git init" >&2
-    echo "Or run with RALPH_SKIP_GIT_CHECK=1 to bypass the Git check." >&2
+    if [[ -n "$AGENT_SKIP_GIT_ARG" ]]; then
+      echo "Or run with RALPH_SKIP_GIT_CHECK=1 to pass ${AGENT_SKIP_GIT_ARG}." >&2
+    else
+      echo "Or run with RALPH_SKIP_GIT_CHECK=1 to bypass the Git check." >&2
+    fi
     exit 1
   fi
 fi
@@ -532,6 +651,9 @@ EOF
     PROMPT_INPUT="$(mktemp)"
     {
       printf "%s\n\n" "$ITERATION_CONTEXT"
+      if [[ -n "$AGENT_PROMPT_CONTEXT" ]]; then
+        printf "%s\n\n" "$AGENT_PROMPT_CONTEXT"
+      fi
       if [[ -n "$STORY_CONTEXT" ]]; then
         printf "%s" "$STORY_CONTEXT"
       fi
@@ -543,13 +665,24 @@ EOF
 
     OUTPUT_FILE="$(mktemp)"
     set +e
-    cat "$PROMPT_INPUT" | "${AGENT_CMD[@]}" - 2>&1 \
-      | tee /dev/stderr \
-      | tee "$OUTPUT_FILE"
-    PIPE_STATUS=("${PIPESTATUS[@]}")
+    if [[ "$AGENT_INPUT_MODE" == "file" ]]; then
+      "${AGENT_CMD[@]}" "$PROMPT_INPUT" 2>&1 \
+        | tee /dev/stderr \
+        | tee "$OUTPUT_FILE"
+      PIPE_STATUS=("${PIPESTATUS[@]}")
+      AGENT_EXIT="${PIPE_STATUS[0]:-0}"
+    else
+      AGENT_INVOKE=("${AGENT_CMD[@]}")
+      if [[ -n "$AGENT_INPUT_ARG" ]]; then
+        AGENT_INVOKE+=("$AGENT_INPUT_ARG")
+      fi
+      cat "$PROMPT_INPUT" | "${AGENT_INVOKE[@]}" 2>&1 \
+        | tee /dev/stderr \
+        | tee "$OUTPUT_FILE"
+      PIPE_STATUS=("${PIPESTATUS[@]}")
+      AGENT_EXIT="${PIPE_STATUS[1]:-0}"
+    fi
     set -e
-
-    AGENT_EXIT="${PIPE_STATUS[1]:-0}"
     OUTPUT="$(cat "$OUTPUT_FILE")"
 
     rm -f "$OUTPUT_FILE"
