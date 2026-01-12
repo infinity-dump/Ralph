@@ -13,6 +13,7 @@ Started: 2024-01-15
 - Ralph: Prompt templates should include fresh-context anchoring plus a per-iteration quality checklist
 - Ralph: Inject a per-iteration context header (git state, optional Codebase Patterns) when RALPH_CONTEXT_SUMMARY=1
 - Ralph: Git guard wraps git via PATH and blocks destructive commands unless bypassed
+- Ralph: Cost controls honor RALPH_TASK_TYPE for iteration caps, RALPH_RATE_LIMIT for pacing, and phase metadata (phase/phases/tags) for chaining.
 - Migrations: IF NOT EXISTS
 - Types: Export from actions.ts
 
@@ -147,4 +148,15 @@ Started: 2024-01-15
   - Cache refresh should be TTL-based with manual clear to keep cold data stable.
 - **Gotchas:**
   - Cache logging must go to stderr to avoid polluting injected prompt context.
+---
+
+## 2026-01-12 - US-012
+- Implemented cost control module for budget tracking, task-type iteration caps, rate limiting, and phase chaining with verification hooks.
+- Wired cost controls into the main loop (phase gating, budget enforcement, rate-limited sleeps, exit cost summary).
+- Files changed: scripts/ralph/modules/cost-control.sh, scripts/ralph/ralph.sh, scripts/ralph/prd.json, scripts/ralph/progress.txt, AGENTS.md
+- Typecheck/tests: bash -n scripts/ralph/ralph.sh scripts/ralph/modules/cost-control.sh
+- **Learnings:**
+  - Budget enforcement needs explicit cost signals (env, tracker cmd, or agent output) to be reliable.
+- **Gotchas:**
+  - Phase chaining relies on jq plus phase metadata (phase/phases/tags); otherwise gating is skipped.
 ---

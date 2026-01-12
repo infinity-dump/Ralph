@@ -61,6 +61,10 @@ if [[ -f "$MODULE_DIR/cache.sh" ]]; then
   # shellcheck source=./modules/cache.sh
   source "$MODULE_DIR/cache.sh"
 fi
+if [[ -f "$MODULE_DIR/cost-control.sh" ]]; then
+  # shellcheck source=./modules/cost-control.sh
+  source "$MODULE_DIR/cost-control.sh"
+fi
 
 extract_progress_patterns() {
   local progress_file="$1"
@@ -95,6 +99,9 @@ build_iteration_context() {
   printf "%s\n" "# Ralph Iteration Context"
   printf "Iteration: %s / %s\n" "$iteration" "$max_iterations"
   printf "Timestamp: %s\n" "$timestamp"
+  if [[ -n "${RALPH_PHASE_CURRENT:-}" ]]; then
+    printf "Phase: %s\n" "$RALPH_PHASE_CURRENT"
+  fi
   printf "Git Branch: %s\n" "${git_branch:-unknown}"
   printf "Git Commit: %s\n" "${git_sha:-unknown}"
   printf "\nGit Status:\n%s\n\n" "${git_status:-Unavailable}"
@@ -110,6 +117,16 @@ build_iteration_context() {
 select_story() {
   if ! command -v jq >/dev/null 2>&1; then
     return 0
+  fi
+
+  local phase=""
+  local include_unassigned="1"
+  if [[ "${RALPH_PHASE_CHAINING_ACTIVE:-0}" == "1" ]]; then
+    phase="${RALPH_PHASE_CURRENT:-}"
+    include_unassigned="${RALPH_PHASE_INCLUDE_UNSPECIFIED:-1}"
+    if [[ ! "$include_unassigned" =~ ^[0-9]+$ ]]; then
+      include_unassigned="1"
+    fi
   fi
 
   local target_story="${RALPH_STORY_ID:-${RALPH_TARGET_STORY:-}}"
@@ -150,7 +167,7 @@ select_story() {
     return 0
   fi
 
-  jq -c '
+  jq -c --arg phase "$phase" --argjson include_unassigned "$include_unassigned" '
     def normalized_status:
       if .passes == true then "completed"
       elif .status then .status
@@ -167,6 +184,17 @@ select_story() {
       | if . < 1 then 1 elif . > 10 then 10 else . end;
     def dependencies_list:
       if (.dependencies | type) == "array" then .dependencies else [] end;
+    def phase_list:
+      if (.phase | type) == "string" then [ .phase ]
+      elif (.phases | type) == "array" then .phases
+      elif (.tags | type) == "array" then .tags
+      else [] end;
+    def in_phase($phase; $include_unassigned):
+      if $phase == "" then true
+      else
+        (phase_list | index($phase) != null)
+        or ($include_unassigned == 1 and (phase_list | length == 0))
+      end;
 
     . as $root
     | ($root.userStories // []) as $stories
@@ -186,6 +214,7 @@ select_story() {
         (.dependencies | length == 0)
         or all(.dependencies[]; $completed | index(.) != null)
       ))
+    | map(select(.story | in_phase($phase; $include_unassigned)))
     | sort_by(.priority, .index)
     | .[0] // empty
   ' "$PRD_FILE" 2>/dev/null || true
@@ -215,6 +244,24 @@ detect_model_name() {
 
   if [[ -n "${AGENT_CMD[0]:-}" ]]; then
     basename "${AGENT_CMD[0]}"
+  fi
+}
+
+ralph_register_exit_trap() {
+  local handlers=()
+  if declare -F ralph_git_guard_cleanup >/dev/null 2>&1; then
+    handlers+=("ralph_git_guard_cleanup")
+  fi
+  if declare -F ralph_cost_control_report >/dev/null 2>&1; then
+    handlers+=("ralph_cost_control_report")
+  fi
+  if (( ${#handlers[@]} > 0 )); then
+    local cmd=""
+    local handler
+    for handler in "${handlers[@]}"; do
+      cmd+="${handler};"
+    done
+    trap "$cmd" EXIT
   fi
 }
 
@@ -270,11 +317,15 @@ if [[ -n "$TARGET_STORY" ]] && ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
+if declare -F ralph_cost_control_task_max_iterations >/dev/null 2>&1; then
+  TASK_TYPE_MAX="$(ralph_cost_control_task_max_iterations || true)"
+  if [[ -n "$TASK_TYPE_MAX" && -z "$MAX_ITERATIONS_ARG" && -z "${MAX_ITERATIONS:-}" ]]; then
+    MAX_ITERATIONS_ARG="$TASK_TYPE_MAX"
+  fi
+fi
+
 if declare -F ralph_git_guard_enable >/dev/null 2>&1; then
   ralph_git_guard_enable
-  if declare -F ralph_git_guard_cleanup >/dev/null 2>&1; then
-    trap 'ralph_git_guard_cleanup' EXIT
-  fi
 fi
 
 if declare -F ralph_circuit_breaker_init >/dev/null 2>&1; then
@@ -285,6 +336,12 @@ if declare -F ralph_circuit_breaker_init >/dev/null 2>&1; then
 else
   MAX_ITERATIONS="${MAX_ITERATIONS_ARG:-${MAX_ITERATIONS:-10}}"
 fi
+
+if declare -F ralph_cost_control_init >/dev/null 2>&1; then
+  ralph_cost_control_init
+fi
+
+ralph_register_exit_trap
 
 SINGLE_STORY_MODE=0
 if ralph_single_story_enabled; then
@@ -358,6 +415,9 @@ echo "Starting Ralph (max iterations: $MAX_ITERATIONS)"
 for i in $(seq "$START_ITERATION" "$MAX_ITERATIONS"); do
   ITERATION_TS="$(date +'%Y-%m-%d %H:%M:%S')"
   echo "=== Iteration $i / $MAX_ITERATIONS ($ITERATION_TS) ==="
+  if declare -F ralph_cost_control_iteration_start >/dev/null 2>&1; then
+    ralph_cost_control_iteration_start
+  fi
   if declare -F ralph_circuit_breaker_warn_if_needed >/dev/null 2>&1; then
     ralph_circuit_breaker_warn_if_needed "$i"
   fi
@@ -373,6 +433,13 @@ for i in $(seq "$START_ITERATION" "$MAX_ITERATIONS"); do
   if [[ ! -f "$PROGRESS_FILE" ]]; then
     echo "Missing progress file: $PROGRESS_FILE" >&2
     exit 1
+  fi
+
+  if declare -F ralph_cost_control_phase_advance_if_needed >/dev/null 2>&1; then
+    if ! ralph_cost_control_phase_advance_if_needed "$PRD_FILE"; then
+      echo "Phase verification failed; stopping." >&2
+      exit 1
+    fi
   fi
 
   STORY_CONTEXT=""
@@ -515,6 +582,15 @@ EOF
     fi
   fi
 
+  if [[ "$AGENT_RAN" -eq 1 ]] && declare -F ralph_cost_control_record_cost >/dev/null 2>&1; then
+    ralph_cost_control_record_cost "$OUTPUT"
+    if declare -F ralph_cost_control_enforce_budget >/dev/null 2>&1; then
+      if ! ralph_cost_control_enforce_budget; then
+        exit 1
+      fi
+    fi
+  fi
+
   if [[ "$SINGLE_STORY_MODE" -eq 0 ]] && echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
     if [[ "$QUALITY_FAILED" -eq 1 ]]; then
       echo "Ignoring COMPLETE because quality gates failed in strict mode." >&2
@@ -609,7 +685,11 @@ EOF
     fi
   fi
 
-  sleep 2
+  if declare -F ralph_cost_control_sleep_between_iterations >/dev/null 2>&1; then
+    ralph_cost_control_sleep_between_iterations
+  else
+    sleep 2
+  fi
 done
 
 if declare -F ralph_circuit_breaker_report >/dev/null 2>&1; then

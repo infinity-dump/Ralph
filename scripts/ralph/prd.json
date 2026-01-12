@@ -440,14 +440,14 @@
         "Phase chaining: data \u2192 API \u2192 UI with verification between stages",
         "Cost estimate output at end of run"
       ],
-      "passes": false,
+      "passes": true,
       "effort": "medium",
       "files": [
         "scripts/ralph/ralph.sh",
         "scripts/ralph/modules/cost-control.sh"
       ],
       "dependencies": [],
-      "status": "pending"
+      "status": "completed"
     },
     {
       "id": "US-013",
