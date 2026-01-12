@@ -7,6 +7,201 @@ PRD_FILE="${PRD_FILE:-$SCRIPT_DIR/prd.json}"
 PROGRESS_FILE="${PROGRESS_FILE:-$SCRIPT_DIR/progress.txt}"
 MODULE_DIR="$SCRIPT_DIR/modules"
 TEMPLATE_DIR="$SCRIPT_DIR/templates"
+RALPH_LOG_ACTIVE=0
+RALPH_RUN_STARTED=0
+RALPH_RUN_START_TS=""
+RALPH_RUN_STATUS=""
+RALPH_STOP_REASON=""
+ITERATIONS_RUN=0
+INITIAL_COMPLETED=""
+TOTAL_STORIES=""
+
+ralph_is_int() {
+  [[ "${1:-}" =~ ^[0-9]+$ ]]
+}
+
+ralph_is_truthy() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+ralph_verbose_enabled() {
+  ralph_is_truthy "${RALPH_VERBOSE:-}"
+}
+
+ralph_log() {
+  echo "$*"
+}
+
+ralph_log_error() {
+  echo "$*" >&2
+}
+
+ralph_log_verbose() {
+  if ralph_verbose_enabled; then
+    echo "$*"
+  fi
+}
+
+ralph_log_init() {
+  local log="${RALPH_LOG:-}"
+  if [[ -z "$log" ]]; then
+    return 0
+  fi
+
+  log="${log/#\~/$HOME}"
+  local dir
+  dir="$(dirname "$log")"
+  if [[ -n "$dir" && "$dir" != "." ]]; then
+    mkdir -p "$dir"
+  fi
+
+  if ! touch "$log"; then
+    ralph_log_error "Unable to write log file: $log"
+    exit 1
+  fi
+
+  exec > >(tee -a "$log") 2>&1
+  RALPH_LOG_ACTIVE=1
+  ralph_log "Logging to $log"
+}
+
+ralph_format_duration() {
+  local total="${1:-}"
+  if ! ralph_is_int "$total"; then
+    return 1
+  fi
+  local hours=$((total / 3600))
+  local mins=$(((total % 3600) / 60))
+  local secs=$((total % 60))
+  printf "%02d:%02d:%02d" "$hours" "$mins" "$secs"
+}
+
+ralph_count_completed_stories() {
+  local prd_file="$1"
+  if [[ ! -f "$prd_file" ]]; then
+    return 1
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    return 1
+  fi
+  jq '[.userStories[] | select(.passes == true)] | length' "$prd_file" 2>/dev/null
+}
+
+ralph_count_total_stories() {
+  local prd_file="$1"
+  if [[ ! -f "$prd_file" ]]; then
+    return 1
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    return 1
+  fi
+  jq '(.userStories // []) | length' "$prd_file" 2>/dev/null
+}
+
+ralph_iteration_banner() {
+  local iteration="$1"
+  local max_iterations="$2"
+  local status="$3"
+  local ts="${4:-}"
+
+  if [[ -n "$ts" ]]; then
+    ralph_log "=== Iteration ${iteration} / ${max_iterations} | status: ${status} (${ts}) ==="
+  else
+    ralph_log "=== Iteration ${iteration} / ${max_iterations} | status: ${status} ==="
+  fi
+}
+
+ralph_run_summary() {
+  local exit_code="$1"
+  local end_ts
+  end_ts="$(date +%s)"
+
+  local status="failed"
+  if [[ -n "${RALPH_RUN_STATUS:-}" ]]; then
+    status="$RALPH_RUN_STATUS"
+  elif [[ "$exit_code" -eq 0 ]]; then
+    status="success"
+  fi
+
+  local duration=""
+  if ralph_is_int "$end_ts" && ralph_is_int "${RALPH_RUN_START_TS:-}"; then
+    duration="$(ralph_format_duration $((end_ts - RALPH_RUN_START_TS)) || true)"
+  fi
+
+  local completed=""
+  local total=""
+  completed="$(ralph_count_completed_stories "$PRD_FILE" || true)"
+  total="$(ralph_count_total_stories "$PRD_FILE" || true)"
+
+  ralph_log "=== Ralph Summary ==="
+  ralph_log "Status: ${status}"
+  ralph_log "Iterations: ${ITERATIONS_RUN:-0} / ${MAX_ITERATIONS:-unknown}"
+
+  if [[ -n "$completed" ]]; then
+    if [[ -n "$total" ]]; then
+      ralph_log "Completed stories: ${completed} / ${total}"
+    else
+      ralph_log "Completed stories: ${completed}"
+    fi
+
+    if ralph_is_int "${INITIAL_COMPLETED:-}" && ralph_is_int "$completed"; then
+      local delta=$((completed - INITIAL_COMPLETED))
+      if (( delta >= 0 )); then
+        ralph_log "Completed this run: ${delta}"
+      fi
+    fi
+  else
+    ralph_log "Completed stories: unavailable (jq not found)"
+  fi
+
+  if [[ -n "$duration" ]]; then
+    ralph_log "Elapsed time: ${duration}"
+  fi
+
+  local cost_line="Cost estimate: unavailable"
+  if [[ -n "${RALPH_COST_TOTAL_CENTS:-}" && -n "${RALPH_COST_ENTRIES:-}" ]]; then
+    if declare -F ralph_cost_control_format_cents >/dev/null 2>&1; then
+      local cost_fmt
+      cost_fmt="$(ralph_cost_control_format_cents "$RALPH_COST_TOTAL_CENTS" || true)"
+      if [[ -n "$cost_fmt" ]]; then
+        cost_line="Cost estimate: ${cost_fmt}"
+        if ralph_is_int "${RALPH_COST_ENTRIES:-}" && ralph_is_int "${RALPH_COST_ITERATION_COUNT:-}"; then
+          cost_line="${cost_line} (tracked iterations: ${RALPH_COST_ENTRIES}/${RALPH_COST_ITERATION_COUNT})"
+        fi
+      fi
+    fi
+  fi
+  ralph_log "$cost_line"
+
+  if [[ "${RALPH_STOP_REASON:-}" == "stuck_story" ]]; then
+    ralph_log "Failure analysis: story ${RALPH_CB_STUCK_STORY_ID:-unknown} failed ${RALPH_CB_STUCK_FAILURES:-?} times; consider splitting the story or reviewing dependencies."
+  fi
+
+  if [[ "$exit_code" -ne 0 && -n "${LAST_FAILURE_REASON:-}" ]]; then
+    ralph_log "Last failure: ${LAST_FAILURE_REASON}"
+  fi
+}
+
+ralph_on_exit() {
+  local exit_code="$1"
+
+  if declare -F ralph_git_guard_cleanup >/dev/null 2>&1; then
+    ralph_git_guard_cleanup
+  fi
+  if declare -F ralph_cost_control_report >/dev/null 2>&1; then
+    ralph_cost_control_report
+  fi
+  if [[ "${RALPH_RUN_STARTED:-0}" == "1" ]]; then
+    ralph_run_summary "$exit_code"
+  fi
+}
 
 ralph_init_templates() {
   local force=0
@@ -82,6 +277,11 @@ if [[ "${1:-}" == "generate-prd" ]]; then
 
   ralph_prd_generator_main "$PRD_FILE" "$@"
   exit $?
+fi
+
+ralph_log_init
+if ralph_verbose_enabled; then
+  ralph_log "Verbose mode enabled."
 fi
 
 RESUME=0
@@ -398,21 +598,7 @@ ralph_agent_apply_preset() {
 }
 
 ralph_register_exit_trap() {
-  local handlers=()
-  if declare -F ralph_git_guard_cleanup >/dev/null 2>&1; then
-    handlers+=("ralph_git_guard_cleanup")
-  fi
-  if declare -F ralph_cost_control_report >/dev/null 2>&1; then
-    handlers+=("ralph_cost_control_report")
-  fi
-  if (( ${#handlers[@]} > 0 )); then
-    local cmd=""
-    local handler
-    for handler in "${handlers[@]}"; do
-      cmd+="${handler};"
-    done
-    trap "$cmd" EXIT
-  fi
+  trap 'ralph_on_exit "$?"' EXIT
 }
 
 ralph_single_story_enabled() {
@@ -592,11 +778,23 @@ if [[ "$RESUME" -eq 1 ]]; then
   fi
 fi
 
-echo "Starting Ralph (max iterations: $MAX_ITERATIONS)"
+ralph_log "Starting Ralph (max iterations: $MAX_ITERATIONS)"
+RALPH_RUN_STARTED=1
+RALPH_RUN_START_TS="$(date +%s)"
+INITIAL_COMPLETED="$(ralph_count_completed_stories "$PRD_FILE" || true)"
+TOTAL_STORIES="$(ralph_count_total_stories "$PRD_FILE" || true)"
+ralph_log_verbose "Prompt file: $PROMPT_FILE"
+ralph_log_verbose "PRD file: $PRD_FILE"
+ralph_log_verbose "Progress file: $PROGRESS_FILE"
+if [[ -n "${AGENT_CMD[*]:-}" ]]; then
+  ralph_log_verbose "Agent command: ${AGENT_CMD[*]}"
+fi
 
 for i in $(seq "$START_ITERATION" "$MAX_ITERATIONS"); do
+  ITERATIONS_RUN=$((ITERATIONS_RUN + 1))
   ITERATION_TS="$(date +'%Y-%m-%d %H:%M:%S')"
-  echo "=== Iteration $i / $MAX_ITERATIONS ($ITERATION_TS) ==="
+  ITERATION_START_EPOCH="$(date +%s)"
+  ralph_iteration_banner "$i" "$MAX_ITERATIONS" "running" "$ITERATION_TS"
   if declare -F ralph_cost_control_iteration_start >/dev/null 2>&1; then
     ralph_cost_control_iteration_start
   fi
@@ -641,7 +839,8 @@ for i in $(seq "$START_ITERATION" "$MAX_ITERATIONS"); do
     STORY_DEPS="$(jq -c '.dependencies // []' <<<"$STORY_SELECTION" 2>/dev/null || true)"
 
     if [[ -n "$STORY_JSON" ]]; then
-      echo "Selected story: ${STORY_ID:-unknown} - ${STORY_TITLE:-untitled} (priority ${STORY_PRIORITY:-n/a})"
+      ralph_log "Story: ${STORY_ID:-unknown} - ${STORY_TITLE:-untitled}"
+      ralph_log_verbose "Story status: ${STORY_STATUS:-n/a} | priority: ${STORY_PRIORITY:-n/a} | deps: ${STORY_DEPS:-[]}"
       STORY_CONTEXT=$(
         cat <<EOF
 # Ralph Story Selection
@@ -658,21 +857,33 @@ EOF
     fi
   fi
 
+  if [[ -z "$STORY_ID" ]]; then
+    ralph_log "Story: none selected"
+  fi
+
   if [[ -n "$TARGET_STORY" ]]; then
     if [[ -z "$STORY_ID" ]]; then
       if story_passed "$TARGET_STORY"; then
-        echo "Target story ${TARGET_STORY} already completed."
+        RALPH_RUN_STATUS="success"
+        RALPH_STOP_REASON="target_story_completed"
+        ralph_log "Target story ${TARGET_STORY} already completed."
         exit 0
       fi
-      echo "Target story ${TARGET_STORY} not found or not selectable." >&2
+      RALPH_RUN_STATUS="error"
+      RALPH_STOP_REASON="target_story_not_selectable"
+      ralph_log_error "Target story ${TARGET_STORY} not found or not selectable."
       exit 1
     fi
     if [[ "$STORY_STATUS" == "completed" ]]; then
-      echo "Target story ${STORY_ID} already completed."
+      RALPH_RUN_STATUS="success"
+      RALPH_STOP_REASON="target_story_completed"
+      ralph_log "Target story ${STORY_ID} already completed."
       exit 0
     fi
     if [[ "$STORY_STATUS" == "blocked" ]]; then
-      echo "Target story ${STORY_ID} is blocked." >&2
+      RALPH_RUN_STATUS="error"
+      RALPH_STOP_REASON="target_story_blocked"
+      ralph_log_error "Target story ${STORY_ID} is blocked."
       exit 1
     fi
   fi
@@ -687,7 +898,7 @@ EOF
   PLAN_FAILED=0
   PLAN_STATUS=0
   if declare -F ralph_planner_enabled >/dev/null 2>&1 && ralph_planner_enabled; then
-    echo "Planning phase enabled."
+    ralph_log "Planning phase enabled."
     ralph_planner_run "$PROMPT_FILE" "$ITERATION_CONTEXT" "$STORY_CONTEXT" "${AGENT_CMD[@]}"
     PLAN_STATUS=$?
     if [[ "$PLAN_STATUS" -eq 2 ]]; then
@@ -702,7 +913,9 @@ EOF
     if declare -F ralph_planner_plan_file >/dev/null 2>&1; then
       PLAN_FILE_DISPLAY="$(ralph_planner_plan_file)"
     fi
-    echo "Plan awaiting manual approval. Review ${PLAN_FILE_DISPLAY} and re-run with RALPH_PLAN_APPROVED=1, add Approved: yes (or ${PLAN_FILE_DISPLAY}.approved), or set RALPH_PLAN_APPROVAL=auto."
+    RALPH_RUN_STATUS="paused"
+    RALPH_STOP_REASON="plan_approval"
+    ralph_log "Plan awaiting manual approval. Review ${PLAN_FILE_DISPLAY} and re-run with RALPH_PLAN_APPROVED=1, add Approved: yes (or ${PLAN_FILE_DISPLAY}.approved), or set RALPH_PLAN_APPROVAL=auto."
     exit 0
   fi
 
@@ -729,21 +942,33 @@ EOF
     OUTPUT_FILE="$(mktemp)"
     set +e
     if [[ "$AGENT_INPUT_MODE" == "file" ]]; then
-      "${AGENT_CMD[@]}" "$PROMPT_INPUT" 2>&1 \
-        | tee /dev/stderr \
-        | tee "$OUTPUT_FILE"
-      PIPE_STATUS=("${PIPESTATUS[@]}")
-      AGENT_EXIT="${PIPE_STATUS[0]:-0}"
+      if [[ "$RALPH_LOG_ACTIVE" -eq 1 ]]; then
+        "${AGENT_CMD[@]}" "$PROMPT_INPUT" 2>&1 | tee "$OUTPUT_FILE"
+        PIPE_STATUS=("${PIPESTATUS[@]}")
+        AGENT_EXIT="${PIPE_STATUS[0]:-0}"
+      else
+        "${AGENT_CMD[@]}" "$PROMPT_INPUT" 2>&1 \
+          | tee /dev/stderr \
+          | tee "$OUTPUT_FILE"
+        PIPE_STATUS=("${PIPESTATUS[@]}")
+        AGENT_EXIT="${PIPE_STATUS[0]:-0}"
+      fi
     else
       AGENT_INVOKE=("${AGENT_CMD[@]}")
       if [[ -n "$AGENT_INPUT_ARG" ]]; then
         AGENT_INVOKE+=("$AGENT_INPUT_ARG")
       fi
-      cat "$PROMPT_INPUT" | "${AGENT_INVOKE[@]}" 2>&1 \
-        | tee /dev/stderr \
-        | tee "$OUTPUT_FILE"
-      PIPE_STATUS=("${PIPESTATUS[@]}")
-      AGENT_EXIT="${PIPE_STATUS[1]:-0}"
+      if [[ "$RALPH_LOG_ACTIVE" -eq 1 ]]; then
+        cat "$PROMPT_INPUT" | "${AGENT_INVOKE[@]}" 2>&1 | tee "$OUTPUT_FILE"
+        PIPE_STATUS=("${PIPESTATUS[@]}")
+        AGENT_EXIT="${PIPE_STATUS[1]:-0}"
+      else
+        cat "$PROMPT_INPUT" | "${AGENT_INVOKE[@]}" 2>&1 \
+          | tee /dev/stderr \
+          | tee "$OUTPUT_FILE"
+        PIPE_STATUS=("${PIPESTATUS[@]}")
+        AGENT_EXIT="${PIPE_STATUS[1]:-0}"
+      fi
     fi
     set -e
     OUTPUT="$(cat "$OUTPUT_FILE")"
@@ -758,10 +983,24 @@ EOF
 
   QUALITY_FAILED=0
   QUALITY_REASON=""
+  QUALITY_STATUS="skipped"
   if [[ "$AGENT_RAN" -eq 1 ]] && declare -F ralph_quality_gates_run >/dev/null 2>&1; then
-    if ! ralph_quality_gates_run "$PRD_FILE" "${STORY_ID:-}"; then
-      QUALITY_FAILED=1
-      QUALITY_REASON="Quality gates failed in strict mode."
+    if declare -F ralph_quality_gates_enabled >/dev/null 2>&1 && ralph_quality_gates_enabled; then
+      if declare -F ralph_quality_gates_strict >/dev/null 2>&1 && ralph_quality_gates_strict; then
+        if ralph_quality_gates_run "$PRD_FILE" "${STORY_ID:-}"; then
+          QUALITY_STATUS="passed"
+        else
+          QUALITY_STATUS="failed (strict)"
+          QUALITY_FAILED=1
+          QUALITY_REASON="Quality gates failed in strict mode."
+        fi
+      else
+        ralph_quality_gates_run "$PRD_FILE" "${STORY_ID:-}" || true
+        QUALITY_STATUS="completed (non-blocking)"
+      fi
+      ralph_log "Quality gates: ${QUALITY_STATUS}"
+    else
+      ralph_log_verbose "Quality gates: disabled"
     fi
   fi
 
@@ -804,7 +1043,9 @@ EOF
         if declare -F ralph_checkpoint_clear >/dev/null 2>&1; then
           ralph_checkpoint_clear
         fi
-        echo "Done!"
+        RALPH_RUN_STATUS="success"
+        RALPH_STOP_REASON="all_stories_completed"
+        ralph_log "Done!"
         exit 0
       else
         echo "Ignoring COMPLETE because pending stories remain in $PRD_FILE" >&2
@@ -838,6 +1079,21 @@ EOF
     fi
   fi
 
+  ITERATION_END_EPOCH="$(date +%s)"
+  ITERATION_STATUS="success"
+  if [[ "$ITERATION_FAILED" -eq 1 ]]; then
+    ITERATION_STATUS="failed"
+  fi
+  ralph_iteration_banner "$i" "$MAX_ITERATIONS" "$ITERATION_STATUS"
+  if [[ "$ITERATION_FAILED" -eq 1 ]]; then
+    ralph_log "Iteration result: failed (${FAILURE_REASON})"
+  else
+    ralph_log "Iteration result: success"
+  fi
+  if ralph_verbose_enabled && ralph_is_int "$ITERATION_START_EPOCH" && ralph_is_int "$ITERATION_END_EPOCH"; then
+    ralph_log_verbose "Iteration duration: $(ralph_format_duration $((ITERATION_END_EPOCH - ITERATION_START_EPOCH)) || true)"
+  fi
+
   if declare -F ralph_checkpoint_enabled >/dev/null 2>&1 && ralph_checkpoint_enabled; then
     if declare -F ralph_checkpoint_should_write >/dev/null 2>&1; then
       if ralph_checkpoint_should_write "$i"; then
@@ -867,6 +1123,20 @@ EOF
       "$FAILURE_REASON"
 
     if ! ralph_circuit_breaker_should_stop "$i"; then
+      if ralph_is_int "${RALPH_CB_STUCK_FAILURES:-0}" \
+        && ralph_is_int "${RALPH_CB_STUCK_THRESHOLD:-0}" \
+        && (( RALPH_CB_STUCK_FAILURES >= RALPH_CB_STUCK_THRESHOLD )); then
+        RALPH_RUN_STATUS="stopped"
+        RALPH_STOP_REASON="stuck_story"
+      elif ralph_is_int "${RALPH_CB_CONSECUTIVE_FAILURES:-0}" \
+        && ralph_is_int "${RALPH_CB_MAX_CONSECUTIVE_FAILURES:-0}" \
+        && (( RALPH_CB_CONSECUTIVE_FAILURES >= RALPH_CB_MAX_CONSECUTIVE_FAILURES )); then
+        RALPH_RUN_STATUS="stopped"
+        RALPH_STOP_REASON="consecutive_failures"
+      else
+        RALPH_RUN_STATUS="stopped"
+        RALPH_STOP_REASON="circuit_breaker"
+      fi
       exit 1
     fi
   fi
@@ -876,7 +1146,9 @@ EOF
       if declare -F ralph_checkpoint_clear >/dev/null 2>&1; then
         ralph_checkpoint_clear
       fi
-      echo "Story ${STORY_ID} completed; exiting single-story mode."
+      RALPH_RUN_STATUS="success"
+      RALPH_STOP_REASON="single_story_completed"
+      ralph_log "Story ${STORY_ID} completed; exiting single-story mode."
       exit 0
     fi
   fi
@@ -891,5 +1163,7 @@ done
 if declare -F ralph_circuit_breaker_report >/dev/null 2>&1; then
   ralph_circuit_breaker_report "max_iterations" "$MAX_ITERATIONS"
 fi
-echo "Max iterations reached"
+RALPH_RUN_STATUS="stopped"
+RALPH_STOP_REASON="max_iterations"
+ralph_log "Max iterations reached"
 exit 1

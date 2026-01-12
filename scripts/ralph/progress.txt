@@ -183,3 +183,14 @@ Started: 2024-01-15
 - **Gotchas:**
   - Run init in new repos before starting the loop so prd/prompt/progress files exist.
 ---
+
+## 2026-01-12 - US-019
+- Added structured iteration banners, story display, quality gate summaries, and end-of-run reporting (iterations, completed stories, elapsed time, cost estimate).
+- Implemented optional verbose logging, log-file teeing via RALPH_LOG, and exit summaries with stuck-story analysis.
+- Files changed: scripts/ralph/ralph.sh, scripts/ralph/prd.json, scripts/ralph/progress.txt, AGENTS.md
+- Typecheck/tests: bash -n scripts/ralph/ralph.sh
+- **Learnings:**
+  - Loop-level logging benefits from centralized helpers and exit summaries to keep output consistent.
+- **Gotchas:**
+  - When teeing output to RALPH_LOG, avoid double-printing agent output by adjusting the tee pipeline.
+---

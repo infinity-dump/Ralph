@@ -462,14 +462,14 @@
         "Log tailing for long overnight runs",
         "Optional notification on completion/failure via RALPH_NOTIFY"
       ],
-      "passes": false,
+      "passes": true,
       "effort": "small",
       "files": [
         "scripts/ralph/modules/monitor.sh",
         "scripts/ralph/ralph.sh"
       ],
       "dependencies": [],
-      "status": "pending"
+      "status": "completed"
     },
     {
       "id": "US-014",
@@ -533,7 +533,7 @@
         "scripts/ralph/ralph.sh"
       ],
       "dependencies": [],
-      "status": "pending"
+      "status": "completed"
     },
     {
       "id": "US-017",
