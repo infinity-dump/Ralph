@@ -17,6 +17,7 @@ Started: 2024-01-15
 - Ralph: Agent presets set default commands, input modes, and prompt context; model limits use normalized agent names.
 - Ralph: Init should seed prd/prompt/progress files from templates and skip existing files unless forced.
 - Ralph: Test-driven mode detects test runners from project files, injects failing test context, and tracks pass/total counts per iteration.
+- Ralph: External tool access is gated by RALPH_ALLOW_EXTERNAL=1 with pre/post hooks and MCP config context injection.
 - Migrations: IF NOT EXISTS
 - Types: Export from actions.ts
 
@@ -215,4 +216,13 @@ Started: 2024-01-15
   - Test mode benefits from re-detecting the runner each iteration to pick up newly added configs.
 - **Gotchas:**
   - Don’t treat a previously detected test command as an override; re-scan project files to avoid stale runners.
+---
+
+## 2026-01-12 - US-016
+- Added external access gating, MCP context injection, and pre/post hooks to the main loop; updated prompt guidance.
+- Files changed: scripts/ralph/ralph.sh, scripts/ralph/prompt.md, scripts/ralph/templates/prompt-template.md, scripts/ralph/prd.json, scripts/ralph/progress.txt, AGENTS.md
+- **Learnings:**
+  - Gate hooks and external context behind RALPH_ALLOW_EXTERNAL=1 to keep default runs isolated.
+- **Gotchas:**
+  - Early exits before iteration setup (e.g., target story already complete) won't trigger hooks.
 ---

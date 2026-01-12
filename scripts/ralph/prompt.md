@@ -27,6 +27,13 @@ These instructions are agent-agnostic and work with Codex CLI or Claude Code.
 - The plan must map each acceptance criterion to planned steps or note gaps.
 - Default approval mode is `auto`. Manual approval gates execution until explicitly approved.
 
+## External Tool Access (When Enabled)
+
+- When `RALPH_ALLOW_EXTERNAL=1`, external tool access is permitted (for MCP-style servers or other integrations).
+- Pre/post hooks can run via `RALPH_PRE_HOOK` and `RALPH_POST_HOOK`; use them to start/stop services or fetch external context.
+- MCP configuration can be provided via `RALPH_MCP_CONFIG`/`RALPH_MCP_SERVERS` (or `MCP_CONFIG`/`MCP_SERVERS`) and will be surfaced in the prompt context.
+- If your agent requires permission-bypass flags (e.g., `--dangerously-skip-permissions`), ensure the chosen preset/command includes them before using tools.
+
 ## Fresh Context Anchoring
 
 - Treat every iteration as a clean start: re-open prd.json, progress.txt, and git state.

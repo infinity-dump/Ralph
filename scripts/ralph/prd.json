@@ -527,7 +527,7 @@
         "Pre/post iteration hooks via RALPH_PRE_HOOK and RALPH_POST_HOOK",
         "Hook scripts can query external APIs, databases, etc."
       ],
-      "passes": false,
+      "passes": true,
       "effort": "medium",
       "files": [
         "scripts/ralph/ralph.sh"

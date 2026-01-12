@@ -36,6 +36,10 @@ ralph_is_truthy() {
   esac
 }
 
+ralph_external_enabled() {
+  ralph_is_truthy "${RALPH_ALLOW_EXTERNAL:-}"
+}
+
 ralph_verbose_enabled() {
   ralph_is_truthy "${RALPH_VERBOSE:-}"
 }
@@ -52,6 +56,82 @@ ralph_log_verbose() {
   if ralph_verbose_enabled; then
     echo "$*"
   fi
+}
+
+ralph_external_context() {
+  if ! ralph_external_enabled; then
+    return 0
+  fi
+
+  local mcp_config="${RALPH_MCP_CONFIG:-${MCP_CONFIG:-}}"
+  local mcp_servers="${RALPH_MCP_SERVERS:-${MCP_SERVERS:-}}"
+
+  cat <<EOF
+# External Tool Access
+External access: enabled (RALPH_ALLOW_EXTERNAL=1)
+MCP config: ${mcp_config:-not set}
+MCP servers: ${mcp_servers:-not set}
+Notes: MCP-style tools may be available when configured. Use pre/post hooks to start or stop external services.
+EOF
+}
+
+ralph_hook_export_env() {
+  local stage="$1"
+  local iteration="$2"
+  local max_iterations="$3"
+  local timestamp="$4"
+  local status="${5:-}"
+  local reason="${6:-}"
+
+  export RALPH_HOOK_STAGE="$stage"
+  export RALPH_HOOK_ITERATION="$iteration"
+  export RALPH_HOOK_MAX_ITERATIONS="$max_iterations"
+  export RALPH_HOOK_TIMESTAMP="$timestamp"
+  export RALPH_HOOK_MODE="${RALPH_MODE:-stories}"
+  export RALPH_HOOK_PHASE="${RALPH_PHASE_CURRENT:-}"
+  export RALPH_HOOK_TESTS_MODE="${TESTS_MODE:-0}"
+  export RALPH_HOOK_STORY_ID="${STORY_ID:-}"
+  export RALPH_HOOK_STORY_TITLE="${STORY_TITLE:-}"
+  export RALPH_HOOK_STORY_STATUS="${STORY_STATUS:-}"
+  export RALPH_HOOK_STORY_PRIORITY="${STORY_PRIORITY:-}"
+  export RALPH_HOOK_STORY_DEPENDENCIES="${STORY_DEPS:-}"
+  export RALPH_HOOK_AGENT_EXIT="${AGENT_EXIT:-}"
+  export RALPH_HOOK_ITERATION_STATUS="$status"
+  export RALPH_HOOK_FAILURE_REASON="$reason"
+  export RALPH_HOOK_TEST_CMD="${RALPH_TEST_CMD:-}"
+  export RALPH_HOOK_TEST_FRAMEWORK="${RALPH_TEST_FRAMEWORK:-}"
+  export RALPH_HOOK_TESTS_EXIT="${TESTS_EXIT:-}"
+  export RALPH_HOOK_TESTS_PROGRESS="${TESTS_PROGRESS:-}"
+  export RALPH_HOOK_QUALITY_STATUS="${QUALITY_STATUS:-}"
+  export RALPH_HOOK_REVIEW_FAILED="${REVIEW_FAILED:-}"
+}
+
+ralph_hook_run() {
+  local hook="$1"
+  local stage="$2"
+  local cwd="${3:-}"
+
+  if [[ -z "$hook" ]]; then
+    return 0
+  fi
+
+  ralph_log "Hook (${stage}): ${hook}"
+
+  local status=0
+  set +e
+  if [[ -n "$cwd" ]]; then
+    (cd "$cwd" && bash -c "$hook")
+  else
+    bash -c "$hook"
+  fi
+  status=$?
+  set -e
+
+  if [[ "$status" -ne 0 ]]; then
+    ralph_log_error "Hook (${stage}) failed (exit ${status})."
+  fi
+
+  return "$status"
 }
 
 ralph_mode_tests_enabled() {
@@ -1363,6 +1443,11 @@ EOF
     CACHE_CONTEXT="$(ralph_cache_context "$PROGRESS_FILE" "$AGENTS_FILE" || true)"
   fi
 
+  EXTERNAL_CONTEXT=""
+  if ralph_external_enabled; then
+    EXTERNAL_CONTEXT="$(ralph_external_context)"
+  fi
+
   TEST_CONTEXT=""
   if [[ "$TESTS_MODE" -eq 1 ]]; then
     if ralph_tests_detect_runner "$TEST_ROOT"; then
@@ -1375,6 +1460,10 @@ EOF
         fi
         RALPH_RUN_STATUS="success"
         RALPH_STOP_REASON="tests_passing"
+        if ralph_external_enabled; then
+          ralph_hook_export_env "post" "$i" "$MAX_ITERATIONS" "$ITERATION_TS" "success" "tests_passing"
+          ralph_hook_run "${RALPH_POST_HOOK:-}" "post" "${REPO_ROOT:-}" || true
+        fi
         ralph_log "All tests passing."
         exit 0
       fi
@@ -1389,6 +1478,11 @@ Goal: add or configure a test runner so the suite can be executed.
 EOF
 )
     fi
+  fi
+
+  if ralph_external_enabled; then
+    ralph_hook_export_env "pre" "$i" "$MAX_ITERATIONS" "$ITERATION_TS" "running" ""
+    ralph_hook_run "${RALPH_PRE_HOOK:-}" "pre" "${REPO_ROOT:-}" || true
   fi
 
   PLAN_PENDING=0
@@ -1419,6 +1513,10 @@ EOF
     fi
     RALPH_RUN_STATUS="paused"
     RALPH_STOP_REASON="plan_approval"
+    if ralph_external_enabled; then
+      ralph_hook_export_env "post" "$i" "$MAX_ITERATIONS" "$ITERATION_TS" "paused" "plan_approval"
+      ralph_hook_run "${RALPH_POST_HOOK:-}" "post" "${REPO_ROOT:-}" || true
+    fi
     ralph_log "Plan awaiting manual approval. Review ${PLAN_FILE_DISPLAY} and re-run with RALPH_PLAN_APPROVED=1, add Approved: yes (or ${PLAN_FILE_DISPLAY}.approved), or set RALPH_PLAN_APPROVAL=auto."
     exit 0
   fi
@@ -1442,6 +1540,9 @@ EOF
       fi
       if [[ -n "$CACHE_CONTEXT" ]]; then
         printf "%s" "$CACHE_CONTEXT"
+      fi
+      if [[ -n "$EXTERNAL_CONTEXT" ]]; then
+        printf "%s\n\n" "$EXTERNAL_CONTEXT"
       fi
       cat "$PROMPT_FILE"
     } > "$PROMPT_INPUT"
@@ -1528,6 +1629,12 @@ EOF
     ralph_cost_control_record_cost "$OUTPUT"
     if declare -F ralph_cost_control_enforce_budget >/dev/null 2>&1; then
       if ! ralph_cost_control_enforce_budget; then
+        RALPH_RUN_STATUS="stopped"
+        RALPH_STOP_REASON="budget_exceeded"
+        if ralph_external_enabled; then
+          ralph_hook_export_env "post" "$i" "$MAX_ITERATIONS" "$ITERATION_TS" "failed" "budget_exceeded"
+          ralph_hook_run "${RALPH_POST_HOOK:-}" "post" "${REPO_ROOT:-}" || true
+        fi
         exit 1
       fi
     fi
@@ -1562,6 +1669,10 @@ EOF
       fi
       RALPH_RUN_STATUS="success"
       RALPH_STOP_REASON="tests_passing"
+      if ralph_external_enabled; then
+        ralph_hook_export_env "post" "$i" "$MAX_ITERATIONS" "$ITERATION_TS" "success" "tests_passing"
+        ralph_hook_run "${RALPH_POST_HOOK:-}" "post" "${REPO_ROOT:-}" || true
+      fi
       ralph_log "All tests passing."
       exit 0
     fi
@@ -1586,6 +1697,10 @@ EOF
         fi
         RALPH_RUN_STATUS="success"
         RALPH_STOP_REASON="all_stories_completed"
+        if ralph_external_enabled; then
+          ralph_hook_export_env "post" "$i" "$MAX_ITERATIONS" "$ITERATION_TS" "success" "all_stories_completed"
+          ralph_hook_run "${RALPH_POST_HOOK:-}" "post" "${REPO_ROOT:-}" || true
+        fi
         ralph_log "Done!"
         exit 0
       else
@@ -1645,6 +1760,11 @@ EOF
   fi
   if ralph_verbose_enabled && ralph_is_int "$ITERATION_START_EPOCH" && ralph_is_int "$ITERATION_END_EPOCH"; then
     ralph_log_verbose "Iteration duration: $(ralph_format_duration $((ITERATION_END_EPOCH - ITERATION_START_EPOCH)) || true)"
+  fi
+
+  if ralph_external_enabled; then
+    ralph_hook_export_env "post" "$i" "$MAX_ITERATIONS" "$ITERATION_TS" "$ITERATION_STATUS" "$FAILURE_REASON"
+    ralph_hook_run "${RALPH_POST_HOOK:-}" "post" "${REPO_ROOT:-}" || true
   fi
 
   if declare -F ralph_checkpoint_enabled >/dev/null 2>&1 && ralph_checkpoint_enabled; then
