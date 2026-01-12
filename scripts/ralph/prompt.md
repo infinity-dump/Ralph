@@ -1,4 +1,6 @@
-# Ralph Agent Instructions
+# Ralph Agent Prompt Template
+
+Use this template as a starting point for `scripts/ralph/prompt.md`.
 
 ## Compatibility
 
