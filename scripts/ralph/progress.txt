@@ -2,6 +2,7 @@
 Started: 2024-01-15
 
 ## Codebase Patterns
+- Ralph: Cache module stores patterns, rules, and common errors in .ralph-cache with TTL-based refresh and context injection when RALPH_CACHE=1.
 - Ralph: Parallel mode uses git worktrees plus per-story locks and a merge lock to coordinate concurrent stories.
 - Ralph: Adversarial review runs when RALPH_ADVERSARIAL=1 and uses RALPH_REVIEWER_CMD or the main agent command.
 - Ralph: Quality gates are opt-in and only block when RALPH_QUALITY_GATES=strict; skip checks when tools/files are missing
@@ -135,4 +136,15 @@ Started: 2024-01-15
   - Checkpoint writes should escape JSON without requiring jq so resume works in minimal environments.
 - **Gotchas:**
   - Avoid nested heredoc delimiter collisions when embedding JSON writers in shell modules.
+---
+
+## 2026-01-12 - US-011
+- Added a persistent cache module that stores patterns, rules, and common errors and injects cached context when RALPH_CACHE=1.
+- Wired cache refresh into ralph.sh with TTL/manual clear handling.
+- Files changed: scripts/ralph/modules/cache.sh, scripts/ralph/ralph.sh, scripts/ralph/prd.json, scripts/ralph/progress.txt, AGENTS.md
+- Typecheck/tests: bash -n scripts/ralph/ralph.sh scripts/ralph/modules/cache.sh
+- **Learnings:**
+  - Cache refresh should be TTL-based with manual clear to keep cold data stable.
+- **Gotchas:**
+  - Cache logging must go to stderr to avoid polluting injected prompt context.
 ---

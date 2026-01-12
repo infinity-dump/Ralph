@@ -418,14 +418,14 @@
         "Cache invalidation on manual clear or TTL",
         "Reduces token costs for repeated context"
       ],
-      "passes": false,
+      "passes": true,
       "effort": "medium",
       "files": [
         "scripts/ralph/modules/cache.sh",
         "scripts/ralph/ralph.sh"
       ],
       "dependencies": [],
-      "status": "pending"
+      "status": "completed"
     },
     {
       "id": "US-012",

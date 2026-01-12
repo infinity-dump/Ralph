@@ -57,6 +57,10 @@ if [[ -f "$MODULE_DIR/checkpoint.sh" ]]; then
   # shellcheck source=./modules/checkpoint.sh
   source "$MODULE_DIR/checkpoint.sh"
 fi
+if [[ -f "$MODULE_DIR/cache.sh" ]]; then
+  # shellcheck source=./modules/cache.sh
+  source "$MODULE_DIR/cache.sh"
+fi
 
 extract_progress_patterns() {
   local progress_file="$1"
@@ -254,6 +258,12 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   fi
 fi
 
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+AGENTS_FILE=""
+if [[ -n "$REPO_ROOT" && -f "$REPO_ROOT/AGENTS.md" ]]; then
+  AGENTS_FILE="$REPO_ROOT/AGENTS.md"
+fi
+
 TARGET_STORY="${RALPH_STORY_ID:-${RALPH_TARGET_STORY:-}}"
 if [[ -n "$TARGET_STORY" ]] && ! command -v jq >/dev/null 2>&1; then
   echo "Targeted story selection requires jq (RALPH_STORY_ID=$TARGET_STORY)." >&2
@@ -419,6 +429,10 @@ EOF
   fi
 
   ITERATION_CONTEXT="$(build_iteration_context "$i" "$MAX_ITERATIONS" "$ITERATION_TS")"
+  CACHE_CONTEXT=""
+  if declare -F ralph_cache_enabled >/dev/null 2>&1 && ralph_cache_enabled; then
+    CACHE_CONTEXT="$(ralph_cache_context "$PROGRESS_FILE" "$AGENTS_FILE" || true)"
+  fi
 
   PLAN_PENDING=0
   PLAN_FAILED=0
@@ -453,6 +467,9 @@ EOF
       printf "%s\n\n" "$ITERATION_CONTEXT"
       if [[ -n "$STORY_CONTEXT" ]]; then
         printf "%s" "$STORY_CONTEXT"
+      fi
+      if [[ -n "$CACHE_CONTEXT" ]]; then
+        printf "%s" "$CACHE_CONTEXT"
       fi
       cat "$PROMPT_FILE"
     } > "$PROMPT_INPUT"
