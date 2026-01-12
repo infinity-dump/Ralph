@@ -194,3 +194,13 @@ Started: 2024-01-15
 - **Gotchas:**
   - When teeing output to RALPH_LOG, avoid double-printing agent output by adjusting the tee pipeline.
 ---
+
+## 2026-01-12 - US-019
+- Confirmed logging features (iteration banners, story display, quality gate status, exit summary) and marked the story complete in `prd.json`.
+- Files changed: scripts/ralph/prd.json, AGENTS.md, scripts/ralph/progress.txt
+- Typecheck/tests: bash -n scripts/ralph/ralph.sh
+- **Learnings:**
+  - RALPH_VERBOSE can surface story metadata and iteration timing without changing default output.
+- **Gotchas:**
+  - Log teeing should avoid duplicating agent output when RALPH_LOG is set.
+---

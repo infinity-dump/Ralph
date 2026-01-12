@@ -597,13 +597,13 @@
         "Optional verbose mode via RALPH_VERBOSE=1",
         "Log file output via RALPH_LOG=<file>"
       ],
-      "passes": false,
+      "passes": true,
       "effort": "small",
       "files": [
         "scripts/ralph/ralph.sh"
       ],
       "dependencies": [],
-      "status": "pending"
+      "status": "completed"
     },
     {
       "id": "US-020",
