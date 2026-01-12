@@ -15,6 +15,11 @@ RALPH_STOP_REASON=""
 ITERATIONS_RUN=0
 INITIAL_COMPLETED=""
 TOTAL_STORIES=""
+RALPH_TEST_CMD_OVERRIDE="${RALPH_TEST_CMD:-}"
+RALPH_TEST_FRAMEWORK_OVERRIDE="${RALPH_TEST_FRAMEWORK:-}"
+RALPH_TEST_CMD=""
+RALPH_TEST_FRAMEWORK=""
+RALPH_TEST_CMD_SOURCE=""
 
 ralph_is_int() {
   [[ "${1:-}" =~ ^[0-9]+$ ]]
@@ -46,6 +51,443 @@ ralph_log_error() {
 ralph_log_verbose() {
   if ralph_verbose_enabled; then
     echo "$*"
+  fi
+}
+
+ralph_mode_tests_enabled() {
+  case "${RALPH_MODE:-stories}" in
+    tests|test)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+ralph_strip_ansi() {
+  sed -E 's/\x1b\[[0-9;]*[mK]//g'
+}
+
+ralph_tests_set_var() {
+  local name="$1"
+  local value="${2-}"
+  printf -v "$name" "%s" "$value"
+}
+
+ralph_tests_detect_js_framework() {
+  local root="$1"
+  local test_script="${2:-}"
+  local frameworks=("vitest" "jest" "mocha" "ava" "tap" "playwright" "cypress")
+
+  local fw
+  for fw in "${frameworks[@]}"; do
+    if [[ -n "$test_script" && "$test_script" == *"$fw"* ]]; then
+      echo "$fw"
+      return 0
+    fi
+  done
+
+  if [[ -f "$root/vitest.config.js" || -f "$root/vitest.config.ts" ]]; then
+    echo "vitest"
+    return 0
+  fi
+  if [[ -f "$root/jest.config.js" || -f "$root/jest.config.ts" || -f "$root/jest.config.cjs" ]]; then
+    echo "jest"
+    return 0
+  fi
+  if [[ -f "$root/mocha.opts" || -f "$root/.mocharc.js" || -f "$root/.mocharc.json" ]]; then
+    echo "mocha"
+    return 0
+  fi
+  if [[ -f "$root/playwright.config.js" || -f "$root/playwright.config.ts" ]]; then
+    echo "playwright"
+    return 0
+  fi
+  if [[ -f "$root/cypress.config.js" || -f "$root/cypress.config.ts" ]]; then
+    echo "cypress"
+    return 0
+  fi
+
+  if [[ -f "$root/package.json" ]]; then
+    if command -v jq >/dev/null 2>&1; then
+      for fw in "${frameworks[@]}"; do
+        if jq -e --arg fw "$fw" \
+          '.devDependencies[$fw] or .dependencies[$fw] or (.scripts.test // "" | test($fw))' \
+          "$root/package.json" >/dev/null 2>&1; then
+          echo "$fw"
+          return 0
+        fi
+      done
+    else
+      for fw in "${frameworks[@]}"; do
+        if grep -q "\"$fw\"" "$root/package.json" 2>/dev/null; then
+          echo "$fw"
+          return 0
+        fi
+      done
+    fi
+  fi
+
+  return 1
+}
+
+ralph_tests_detect_runner() {
+  local root="$1"
+
+  local override="${RALPH_TEST_CMD_OVERRIDE:-}"
+  RALPH_TEST_CMD=""
+  RALPH_TEST_FRAMEWORK=""
+  RALPH_TEST_CMD_SOURCE=""
+
+  if [[ -n "$override" ]]; then
+    RALPH_TEST_CMD="$override"
+    if [[ -n "${RALPH_TEST_FRAMEWORK_OVERRIDE:-}" ]]; then
+      RALPH_TEST_FRAMEWORK="$RALPH_TEST_FRAMEWORK_OVERRIDE"
+    else
+      RALPH_TEST_FRAMEWORK="custom"
+    fi
+    RALPH_TEST_CMD_SOURCE="env"
+    return 0
+  fi
+
+  if [[ -f "$root/package.json" ]]; then
+    local test_script=""
+    if command -v jq >/dev/null 2>&1; then
+      test_script="$(jq -r '.scripts.test // empty' "$root/package.json" 2>/dev/null || true)"
+    elif command -v node >/dev/null 2>&1; then
+      test_script="$(node -e 'try {const p=require("./package.json"); console.log((p.scripts && p.scripts.test) || "");} catch (e) {}' 2>/dev/null)"
+    else
+      test_script="$(grep -E '"test" *:' "$root/package.json" | head -n 1 | sed -E 's/.*"test" *: *"([^"]+)".*/\1/' || true)"
+    fi
+
+    if [[ -n "$test_script" ]] && [[ "$test_script" != *"no test specified"* ]]; then
+      local manager=""
+      if [[ -f "$root/pnpm-lock.yaml" ]] && command -v pnpm >/dev/null 2>&1; then
+        manager="pnpm"
+      elif [[ -f "$root/yarn.lock" ]] && command -v yarn >/dev/null 2>&1; then
+        manager="yarn"
+      elif command -v npm >/dev/null 2>&1; then
+        manager="npm"
+      elif command -v pnpm >/dev/null 2>&1; then
+        manager="pnpm"
+      elif command -v yarn >/dev/null 2>&1; then
+        manager="yarn"
+      fi
+
+      if [[ -n "$manager" ]]; then
+        RALPH_TEST_CMD="${manager} test"
+        RALPH_TEST_FRAMEWORK="$(ralph_tests_detect_js_framework "$root" "$test_script" || true)"
+        if [[ -z "$RALPH_TEST_FRAMEWORK" ]]; then
+          RALPH_TEST_FRAMEWORK="node"
+        fi
+        RALPH_TEST_CMD_SOURCE="package.json"
+        return 0
+      fi
+    fi
+  fi
+
+  local py_cmd=""
+  if command -v python3 >/dev/null 2>&1; then
+    py_cmd="python3"
+  elif command -v python >/dev/null 2>&1; then
+    py_cmd="python"
+  fi
+
+  local pytest_detected=0
+  if [[ -f "$root/pytest.ini" || -f "$root/tox.ini" || -f "$root/conftest.py" ]]; then
+    pytest_detected=1
+  fi
+  if [[ -f "$root/pyproject.toml" ]] && grep -q "pytest" "$root/pyproject.toml" 2>/dev/null; then
+    pytest_detected=1
+  fi
+  if [[ -f "$root/setup.cfg" ]] && grep -q "pytest" "$root/setup.cfg" 2>/dev/null; then
+    pytest_detected=1
+  fi
+  if [[ -f "$root/requirements.txt" ]] && grep -q "pytest" "$root/requirements.txt" 2>/dev/null; then
+    pytest_detected=1
+  fi
+
+  if [[ "$pytest_detected" -eq 1 && -n "$py_cmd" ]]; then
+    RALPH_TEST_CMD="${py_cmd} -m pytest"
+    RALPH_TEST_FRAMEWORK="pytest"
+    RALPH_TEST_CMD_SOURCE="python"
+    return 0
+  fi
+
+  if [[ -f "$root/go.mod" ]] && command -v go >/dev/null 2>&1; then
+    if find "$root" -name '*_test.go' -print -quit 2>/dev/null | grep -q .; then
+      RALPH_TEST_CMD="go test ./..."
+      RALPH_TEST_FRAMEWORK="go"
+      RALPH_TEST_CMD_SOURCE="go"
+      return 0
+    fi
+  fi
+
+  if [[ -f "$root/Cargo.toml" ]] && command -v cargo >/dev/null 2>&1; then
+    RALPH_TEST_CMD="cargo test"
+    RALPH_TEST_FRAMEWORK="cargo"
+    RALPH_TEST_CMD_SOURCE="cargo"
+    return 0
+  fi
+
+  return 1
+}
+
+ralph_tests_parse_counts() {
+  local file="$1"
+  local framework="${2:-}"
+  local passed=""
+  local failed=""
+  local total=""
+
+  local tests_line
+  tests_line="$(grep -E "Tests:" "$file" 2>/dev/null | tail -n 1 || true)"
+  if [[ -n "$tests_line" ]]; then
+    if [[ "$tests_line" =~ ([0-9]+)[[:space:]]+passed ]]; then
+      passed="${BASH_REMATCH[1]}"
+    fi
+    if [[ "$tests_line" =~ ([0-9]+)[[:space:]]+failed ]]; then
+      failed="${BASH_REMATCH[1]}"
+    fi
+    if [[ "$tests_line" =~ ([0-9]+)[[:space:]]+total ]]; then
+      total="${BASH_REMATCH[1]}"
+    fi
+  fi
+
+  local pytest_line
+  pytest_line="$(grep -E "=+ .* (passed|failed|error)" "$file" 2>/dev/null | tail -n 1 || true)"
+  if [[ -n "$pytest_line" ]]; then
+    local pytest_pass=""
+    local pytest_fail=""
+    local pytest_error=""
+    if [[ "$pytest_line" =~ ([0-9]+)[[:space:]]+passed ]]; then
+      pytest_pass="${BASH_REMATCH[1]}"
+    fi
+    if [[ "$pytest_line" =~ ([0-9]+)[[:space:]]+failed ]]; then
+      pytest_fail="${BASH_REMATCH[1]}"
+    fi
+    if [[ "$pytest_line" =~ ([0-9]+)[[:space:]]+error ]]; then
+      pytest_error="${BASH_REMATCH[1]}"
+    fi
+    if [[ -n "$pytest_pass" ]]; then
+      passed="$pytest_pass"
+    fi
+    if [[ -n "$pytest_fail" || -n "$pytest_error" ]]; then
+      local fail_total=0
+      if ralph_is_int "${pytest_fail:-}"; then
+        fail_total=$((fail_total + pytest_fail))
+      fi
+      if ralph_is_int "${pytest_error:-}"; then
+        fail_total=$((fail_total + pytest_error))
+      fi
+      failed="$fail_total"
+    fi
+  fi
+
+  local cargo_line
+  cargo_line="$(grep -E "test result:" "$file" 2>/dev/null | tail -n 1 || true)"
+  if [[ -n "$cargo_line" ]]; then
+    if [[ "$cargo_line" =~ ([0-9]+)[[:space:]]+passed ]]; then
+      passed="${BASH_REMATCH[1]}"
+    fi
+    if [[ "$cargo_line" =~ ([0-9]+)[[:space:]]+failed ]]; then
+      failed="${BASH_REMATCH[1]}"
+    fi
+  fi
+
+  local mocha_pass
+  local mocha_fail
+  mocha_pass="$(grep -E "[0-9]+ passing" "$file" 2>/dev/null | tail -n 1 || true)"
+  mocha_fail="$(grep -E "[0-9]+ failing" "$file" 2>/dev/null | tail -n 1 || true)"
+  if [[ -n "$mocha_pass" ]]; then
+    if [[ "$mocha_pass" =~ ([0-9]+)[[:space:]]+passing ]]; then
+      passed="${BASH_REMATCH[1]}"
+    fi
+  fi
+  if [[ -n "$mocha_fail" ]]; then
+    if [[ "$mocha_fail" =~ ([0-9]+)[[:space:]]+failing ]]; then
+      failed="${BASH_REMATCH[1]}"
+    fi
+  fi
+
+  if [[ "$framework" == "go" ]]; then
+    local go_total=0
+    local go_pass=0
+    local go_fail=0
+    go_total="$(grep -c "^=== RUN" "$file" 2>/dev/null || true)"
+    go_pass="$(grep -c "^--- PASS" "$file" 2>/dev/null || true)"
+    go_fail="$(grep -c "^--- FAIL" "$file" 2>/dev/null || true)"
+    if ralph_is_int "$go_total" && (( go_total > 0 )); then
+      total="$go_total"
+      passed="$go_pass"
+      failed="$go_fail"
+    elif ralph_is_int "$go_pass" || ralph_is_int "$go_fail"; then
+      if ralph_is_int "$go_pass"; then
+        passed="$go_pass"
+      fi
+      if ralph_is_int "$go_fail"; then
+        failed="$go_fail"
+      fi
+    fi
+  fi
+
+  if [[ -z "$total" ]]; then
+    if ralph_is_int "$passed" && ralph_is_int "$failed"; then
+      total=$((passed + failed))
+    fi
+  fi
+  if [[ -z "$failed" ]]; then
+    if ralph_is_int "$total" && ralph_is_int "$passed"; then
+      if (( total >= passed )); then
+        failed=$((total - passed))
+      fi
+    fi
+  fi
+  if [[ -z "$passed" ]]; then
+    if ralph_is_int "$total" && ralph_is_int "$failed"; then
+      if (( total >= failed )); then
+        passed=$((total - failed))
+      fi
+    fi
+  fi
+
+  echo "${passed}|${total}|${failed}"
+}
+
+ralph_tests_format_progress() {
+  local passed="${1:-}"
+  local total="${2:-}"
+  local failed="${3:-}"
+
+  if ralph_is_int "$total"; then
+    local passed_count=0
+    local failed_count=""
+    if ralph_is_int "$passed"; then
+      passed_count="$passed"
+    fi
+    if ralph_is_int "$failed"; then
+      failed_count="$failed"
+    fi
+    if [[ -n "$failed_count" ]]; then
+      echo "${passed_count}/${total} passing (${failed_count} failing)"
+    else
+      echo "${passed_count}/${total} passing"
+    fi
+    return 0
+  fi
+
+  if ralph_is_int "$passed"; then
+    echo "${passed} passing"
+    return 0
+  fi
+
+  echo "counts unavailable"
+}
+
+ralph_tests_failure_snippet() {
+  local file="$1"
+  local max_lines="${2:-120}"
+
+  local snippet
+  snippet="$(grep -nE "FAIL|FAILED|ERROR|Error|AssertionError|Traceback" "$file" 2>/dev/null | head -n 40 || true)"
+  if [[ -z "$snippet" ]]; then
+    snippet="$(tail -n "$max_lines" "$file" 2>/dev/null || true)"
+  fi
+  printf "%s\n" "$snippet"
+}
+
+ralph_tests_run() {
+  local prefix="$1"
+  local root="$2"
+  local cmd="$3"
+  local framework="${4:-}"
+  local phase="${5:-run}"
+
+  local output_file
+  output_file="$(mktemp)"
+  local clean_file
+  clean_file="$(mktemp)"
+
+  ralph_log "Tests (${phase}): running ${cmd}"
+  set +e
+  if [[ "$RALPH_LOG_ACTIVE" -eq 1 ]]; then
+    (cd "$root" && eval "$cmd") 2>&1 | tee "$output_file"
+    local status="${PIPESTATUS[0]:-0}"
+  else
+    (cd "$root" && eval "$cmd") 2>&1 | tee /dev/stderr | tee "$output_file"
+    local status="${PIPESTATUS[0]:-0}"
+  fi
+  set -e
+
+  ralph_strip_ansi < "$output_file" > "$clean_file"
+
+  local counts
+  counts="$(ralph_tests_parse_counts "$clean_file" "$framework")"
+  local passed=""
+  local total=""
+  local failed=""
+  IFS='|' read -r passed total failed <<<"$counts"
+
+  local progress
+  progress="$(ralph_tests_format_progress "$passed" "$total" "$failed")"
+
+  local snippet=""
+  if [[ "$status" -ne 0 ]]; then
+    snippet="$(ralph_tests_failure_snippet "$clean_file")"
+  fi
+
+  ralph_tests_set_var "${prefix}_TEST_EXIT" "$status"
+  ralph_tests_set_var "${prefix}_TEST_PASSED" "$passed"
+  ralph_tests_set_var "${prefix}_TEST_TOTAL" "$total"
+  ralph_tests_set_var "${prefix}_TEST_FAILED" "$failed"
+  ralph_tests_set_var "${prefix}_TEST_PROGRESS" "$progress"
+  ralph_tests_set_var "${prefix}_TEST_SNIPPET" "$snippet"
+
+  rm -f "$output_file" "$clean_file"
+}
+
+ralph_tests_context() {
+  local prefix="$1"
+  local exit_var="${prefix}_TEST_EXIT"
+  local passed_var="${prefix}_TEST_PASSED"
+  local total_var="${prefix}_TEST_TOTAL"
+  local failed_var="${prefix}_TEST_FAILED"
+  local progress_var="${prefix}_TEST_PROGRESS"
+  local snippet_var="${prefix}_TEST_SNIPPET"
+
+  local exit_status="${!exit_var-}"
+  local passed="${!passed_var-}"
+  local total="${!total_var-}"
+  local failed="${!failed_var-}"
+  local progress="${!progress_var-}"
+  local snippet="${!snippet_var-}"
+  local status_label="unknown"
+  if ralph_is_int "$exit_status"; then
+    if (( exit_status == 0 )); then
+      status_label="passed"
+    else
+      status_label="failed"
+    fi
+  fi
+
+  cat <<EOF
+# Ralph Test Status
+Mode: tests
+Framework: ${RALPH_TEST_FRAMEWORK:-unknown}
+Command: ${RALPH_TEST_CMD:-not detected}
+Last run: ${status_label}${exit_status:+ (exit ${exit_status})}
+Tests: ${progress:-counts unavailable}
+
+Goal: fix failing tests and make the suite pass.
+EOF
+
+  if [[ "$status_label" == "failed" && -n "$snippet" ]]; then
+    cat <<EOF
+
+Failing test output (excerpt):
+${snippet}
+EOF
   fi
 }
 
@@ -282,6 +724,22 @@ fi
 ralph_log_init
 if ralph_verbose_enabled; then
   ralph_log "Verbose mode enabled."
+fi
+
+RALPH_MODE="${RALPH_MODE:-stories}"
+case "$RALPH_MODE" in
+  stories|tests)
+    ;;
+  *)
+    ralph_log_error "Unknown RALPH_MODE '$RALPH_MODE'; defaulting to stories."
+    RALPH_MODE="stories"
+    ;;
+esac
+
+TESTS_MODE=0
+if ralph_mode_tests_enabled; then
+  TESTS_MODE=1
+  ralph_log "Mode: tests (test-driven loop)."
 fi
 
 RESUME=0
@@ -678,6 +1136,7 @@ AGENTS_FILE=""
 if [[ -n "$REPO_ROOT" && -f "$REPO_ROOT/AGENTS.md" ]]; then
   AGENTS_FILE="$REPO_ROOT/AGENTS.md"
 fi
+TEST_ROOT="${REPO_ROOT:-$(pwd)}"
 
 TARGET_STORY="${RALPH_STORY_ID:-${RALPH_TARGET_STORY:-}}"
 if [[ -n "$TARGET_STORY" ]] && ! command -v jq >/dev/null 2>&1; then
@@ -701,6 +1160,9 @@ if declare -F ralph_circuit_breaker_init >/dev/null 2>&1; then
   MODEL_NAME="$(detect_model_name)"
   ralph_circuit_breaker_apply_model_limit "$MODEL_NAME"
   MAX_ITERATIONS="$RALPH_CB_MAX_ITERATIONS"
+  if [[ "$TESTS_MODE" -eq 1 && -z "${MAX_CONSECUTIVE_FAILURES+x}" ]]; then
+    RALPH_CB_MAX_CONSECUTIVE_FAILURES="$MAX_ITERATIONS"
+  fi
 else
   MAX_ITERATIONS="${MAX_ITERATIONS_ARG:-${MAX_ITERATIONS:-10}}"
 fi
@@ -829,7 +1291,10 @@ for i in $(seq "$START_ITERATION" "$MAX_ITERATIONS"); do
   STORY_STATUS=""
   STORY_DEPS=""
   STORY_JSON=""
-  STORY_SELECTION="$(select_story)"
+  STORY_SELECTION=""
+  if [[ "$TESTS_MODE" -eq 0 || -n "$TARGET_STORY" ]]; then
+    STORY_SELECTION="$(select_story)"
+  fi
   if [[ -n "$STORY_SELECTION" ]]; then
     STORY_JSON="$(jq -c '.story' <<<"$STORY_SELECTION" 2>/dev/null || true)"
     STORY_ID="$(jq -r '.story.id // empty' <<<"$STORY_SELECTION" 2>/dev/null || true)"
@@ -858,10 +1323,14 @@ EOF
   fi
 
   if [[ -z "$STORY_ID" ]]; then
-    ralph_log "Story: none selected"
+    if [[ "$TESTS_MODE" -eq 1 ]]; then
+      ralph_log "Story: skipped (tests mode)"
+    else
+      ralph_log "Story: none selected"
+    fi
   fi
 
-  if [[ -n "$TARGET_STORY" ]]; then
+  if [[ "$TESTS_MODE" -eq 0 && -n "$TARGET_STORY" ]]; then
     if [[ -z "$STORY_ID" ]]; then
       if story_passed "$TARGET_STORY"; then
         RALPH_RUN_STATUS="success"
@@ -894,12 +1363,47 @@ EOF
     CACHE_CONTEXT="$(ralph_cache_context "$PROGRESS_FILE" "$AGENTS_FILE" || true)"
   fi
 
+  TEST_CONTEXT=""
+  if [[ "$TESTS_MODE" -eq 1 ]]; then
+    if ralph_tests_detect_runner "$TEST_ROOT"; then
+      ralph_log "Tests: detected ${RALPH_TEST_FRAMEWORK:-unknown} (${RALPH_TEST_CMD})"
+      ralph_tests_run "PRE" "$TEST_ROOT" "$RALPH_TEST_CMD" "$RALPH_TEST_FRAMEWORK" "pre"
+      TEST_CONTEXT="$(ralph_tests_context "PRE")"
+      if [[ "${PRE_TEST_EXIT:-1}" -eq 0 ]]; then
+        if declare -F ralph_checkpoint_clear >/dev/null 2>&1; then
+          ralph_checkpoint_clear
+        fi
+        RALPH_RUN_STATUS="success"
+        RALPH_STOP_REASON="tests_passing"
+        ralph_log "All tests passing."
+        exit 0
+      fi
+    else
+      TEST_CONTEXT=$(cat <<EOF
+# Ralph Test Status
+Mode: tests
+Framework: unknown
+Command: not detected
+Status: no test runner detected from project files.
+Goal: add or configure a test runner so the suite can be executed.
+EOF
+)
+    fi
+  fi
+
   PLAN_PENDING=0
   PLAN_FAILED=0
   PLAN_STATUS=0
   if declare -F ralph_planner_enabled >/dev/null 2>&1 && ralph_planner_enabled; then
     ralph_log "Planning phase enabled."
-    ralph_planner_run "$PROMPT_FILE" "$ITERATION_CONTEXT" "$STORY_CONTEXT" "${AGENT_CMD[@]}"
+    PLAN_CONTEXT=""
+    if [[ -n "$TEST_CONTEXT" ]]; then
+      PLAN_CONTEXT+="${TEST_CONTEXT}"$'\n'
+    fi
+    if [[ -n "$STORY_CONTEXT" ]]; then
+      PLAN_CONTEXT+="${STORY_CONTEXT}"
+    fi
+    ralph_planner_run "$PROMPT_FILE" "$ITERATION_CONTEXT" "$PLAN_CONTEXT" "${AGENT_CMD[@]}"
     PLAN_STATUS=$?
     if [[ "$PLAN_STATUS" -eq 2 ]]; then
       PLAN_PENDING=1
@@ -929,6 +1433,9 @@ EOF
       printf "%s\n\n" "$ITERATION_CONTEXT"
       if [[ -n "$AGENT_PROMPT_CONTEXT" ]]; then
         printf "%s\n\n" "$AGENT_PROMPT_CONTEXT"
+      fi
+      if [[ -n "$TEST_CONTEXT" ]]; then
+        printf "%s\n\n" "$TEST_CONTEXT"
       fi
       if [[ -n "$STORY_CONTEXT" ]]; then
         printf "%s" "$STORY_CONTEXT"
@@ -1026,7 +1533,41 @@ EOF
     fi
   fi
 
-  if [[ "$SINGLE_STORY_MODE" -eq 0 ]] && echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
+  TESTS_PASSED=0
+  TESTS_EXIT=""
+  TESTS_PROGRESS=""
+  if [[ "$TESTS_MODE" -eq 1 && "$AGENT_RAN" -eq 1 ]]; then
+    if ralph_tests_detect_runner "$TEST_ROOT"; then
+      ralph_log "Tests: detected ${RALPH_TEST_FRAMEWORK:-unknown} (${RALPH_TEST_CMD})"
+      ralph_tests_run "POST" "$TEST_ROOT" "$RALPH_TEST_CMD" "$RALPH_TEST_FRAMEWORK" "post"
+      TESTS_EXIT="${POST_TEST_EXIT:-1}"
+      TESTS_PROGRESS="${POST_TEST_PROGRESS:-counts unavailable}"
+      ralph_log "Tests: ${TESTS_PROGRESS}"
+      if [[ "$TESTS_EXIT" -eq 0 ]]; then
+        TESTS_PASSED=1
+      fi
+    else
+      ralph_log_error "Tests: no test runner detected after iteration."
+      TESTS_EXIT=1
+      TESTS_PROGRESS="counts unavailable"
+    fi
+  fi
+
+  if [[ "$TESTS_MODE" -eq 1 && "$AGENT_RAN" -eq 1 && "$TESTS_PASSED" -eq 1 ]]; then
+    if [[ "$QUALITY_FAILED" -eq 1 ]]; then
+      ralph_log_error "Tests passing but quality gates failed in strict mode."
+    else
+      if declare -F ralph_checkpoint_clear >/dev/null 2>&1; then
+        ralph_checkpoint_clear
+      fi
+      RALPH_RUN_STATUS="success"
+      RALPH_STOP_REASON="tests_passing"
+      ralph_log "All tests passing."
+      exit 0
+    fi
+  fi
+
+  if [[ "$SINGLE_STORY_MODE" -eq 0 && "$TESTS_MODE" -eq 0 ]] && echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
     if [[ "$QUALITY_FAILED" -eq 1 ]]; then
       echo "Ignoring COMPLETE because quality gates failed in strict mode." >&2
     else
@@ -1061,6 +1602,18 @@ EOF
   elif [[ "$AGENT_EXIT" -ne 0 ]]; then
     ITERATION_FAILED=1
     FAILURE_REASON="Agent command exited with status $AGENT_EXIT."
+  elif [[ "$TESTS_MODE" -eq 1 ]]; then
+    if [[ -n "$TESTS_EXIT" && "$TESTS_EXIT" -ne 0 ]]; then
+      ITERATION_FAILED=1
+      if [[ -n "$TESTS_PROGRESS" ]]; then
+        FAILURE_REASON="Tests still failing (${TESTS_PROGRESS})."
+      else
+        FAILURE_REASON="Tests still failing."
+      fi
+    elif [[ -z "$TESTS_EXIT" && "$AGENT_RAN" -eq 1 ]]; then
+      ITERATION_FAILED=1
+      FAILURE_REASON="Tests not executed (no test runner detected)."
+    fi
   elif [[ -n "${STORY_ID:-}" ]] && ! story_passed "$STORY_ID"; then
     ITERATION_FAILED=1
     FAILURE_REASON="Story ${STORY_ID} still not marked as passed."

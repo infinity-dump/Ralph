@@ -16,6 +16,7 @@ Started: 2024-01-15
 - Ralph: Cost controls honor RALPH_TASK_TYPE for iteration caps, RALPH_RATE_LIMIT for pacing, and phase metadata (phase/phases/tags) for chaining.
 - Ralph: Agent presets set default commands, input modes, and prompt context; model limits use normalized agent names.
 - Ralph: Init should seed prd/prompt/progress files from templates and skip existing files unless forced.
+- Ralph: Test-driven mode detects test runners from project files, injects failing test context, and tracks pass/total counts per iteration.
 - Migrations: IF NOT EXISTS
 - Types: Export from actions.ts
 
@@ -203,4 +204,15 @@ Started: 2024-01-15
   - RALPH_VERBOSE can surface story metadata and iteration timing without changing default output.
 - **Gotchas:**
   - Log teeing should avoid duplicating agent output when RALPH_LOG is set.
+---
+
+## 2026-01-12 - US-020
+- Implemented test-driven loop mode in `ralph.sh`, including test runner detection, pre/post test runs, and test-focused prompt context.
+- Added test progress logging with pass/total counts and completion based on the test suite passing.
+- Files changed: scripts/ralph/ralph.sh, scripts/ralph/prd.json, scripts/ralph/progress.txt, AGENTS.md
+- Typecheck/tests: bash -n scripts/ralph/ralph.sh
+- **Learnings:**
+  - Test mode benefits from re-detecting the runner each iteration to pick up newly added configs.
+- **Gotchas:**
+  - Don’t treat a previously detected test command as an override; re-scan project files to avoid stale runners.
 ---
