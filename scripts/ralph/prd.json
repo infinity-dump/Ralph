@@ -571,7 +571,7 @@
         "ralph.sh init command copies templates to scripts/ralph/",
         "Quick start in under 5 minutes"
       ],
-      "passes": false,
+      "passes": true,
       "effort": "small",
       "files": [
         "scripts/ralph/templates/prd-template.json",
@@ -580,7 +580,7 @@
         "scripts/ralph/ralph.sh"
       ],
       "dependencies": [],
-      "status": "pending"
+      "status": "completed"
     },
     {
       "id": "US-019",

@@ -1,0 +1,59 @@
+{
+  "title": "PRD: Example Feature",
+  "version": "1.0.0",
+  "status": "draft",
+  "created": "YYYY-MM-DD",
+  "updated": "YYYY-MM-DD",
+  "overview": {
+    "summary": "Briefly describe the feature and its goal."
+  },
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Define data model",
+      "description": "Create the data structures needed for the feature.",
+      "priority": 1,
+      "acceptanceCriteria": [
+        "List required fields and constraints",
+        "Add migrations or storage setup",
+        "Validate inputs before persistence"
+      ],
+      "passes": false,
+      "effort": "small",
+      "files": [],
+      "dependencies": [],
+      "status": "pending"
+    },
+    {
+      "id": "US-002",
+      "title": "Implement core workflow",
+      "description": "Deliver the primary behavior for the feature.",
+      "priority": 2,
+      "acceptanceCriteria": [
+        "Implement the main happy path",
+        "Handle expected error states",
+        "Verify behavior matches requirements"
+      ],
+      "passes": false,
+      "effort": "small",
+      "files": [],
+      "dependencies": ["US-001"],
+      "status": "pending"
+    },
+    {
+      "id": "US-003",
+      "title": "Add validation and docs",
+      "description": "Round out the feature with checks and documentation.",
+      "priority": 3,
+      "acceptanceCriteria": [
+        "Add tests or validation checks",
+        "Document usage and setup steps"
+      ],
+      "passes": false,
+      "effort": "small",
+      "files": [],
+      "dependencies": ["US-002"],
+      "status": "pending"
+    }
+  ]
+}

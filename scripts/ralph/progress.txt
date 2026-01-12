@@ -15,6 +15,7 @@ Started: 2024-01-15
 - Ralph: Git guard wraps git via PATH and blocks destructive commands unless bypassed
 - Ralph: Cost controls honor RALPH_TASK_TYPE for iteration caps, RALPH_RATE_LIMIT for pacing, and phase metadata (phase/phases/tags) for chaining.
 - Ralph: Agent presets set default commands, input modes, and prompt context; model limits use normalized agent names.
+- Ralph: Init should seed prd/prompt/progress files from templates and skip existing files unless forced.
 - Migrations: IF NOT EXISTS
 - Types: Export from actions.ts
 
@@ -171,4 +172,14 @@ Started: 2024-01-15
   - Normalize agent names before applying model-specific iteration limits.
 - **Gotchas:**
   - Custom agent commands keep stdin semantics; use presets when file-based input is required.
+---
+
+## 2026-01-12 - US-018
+- Added a PRD template with example atomic stories and an init command to seed prd/prompt/progress files from templates.
+- Files changed: scripts/ralph/ralph.sh, scripts/ralph/templates/prd-template.json, scripts/ralph/prd.json, scripts/ralph/progress.txt, AGENTS.md
+- Typecheck/tests: bash -n scripts/ralph/ralph.sh (no test config found).
+- **Learnings:**
+  - Init should copy template content into working files and avoid overwriting without --force.
+- **Gotchas:**
+  - Run init in new repos before starting the loop so prd/prompt/progress files exist.
 ---

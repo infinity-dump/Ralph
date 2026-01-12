@@ -6,6 +6,69 @@ PROMPT_FILE="${PROMPT_FILE:-$SCRIPT_DIR/prompt.md}"
 PRD_FILE="${PRD_FILE:-$SCRIPT_DIR/prd.json}"
 PROGRESS_FILE="${PROGRESS_FILE:-$SCRIPT_DIR/progress.txt}"
 MODULE_DIR="$SCRIPT_DIR/modules"
+TEMPLATE_DIR="$SCRIPT_DIR/templates"
+
+ralph_init_templates() {
+  local force=0
+
+  case "${1:-}" in
+    --force)
+      force=1
+      shift
+      ;;
+    --help|-h)
+      cat <<EOF
+Usage: $(basename "$0") init [--force]
+Copies template files from ${TEMPLATE_DIR} into ${SCRIPT_DIR}.
+EOF
+      return 0
+      ;;
+  esac
+
+  local -a mappings=(
+    "prd-template.json:prd.json"
+    "prompt-template.md:prompt.md"
+    "progress-template.txt:progress.txt"
+  )
+  local map
+  local missing=0
+  local copied=0
+
+  for map in "${mappings[@]}"; do
+    local src="$TEMPLATE_DIR/${map%%:*}"
+    local dest="$SCRIPT_DIR/${map##*:}"
+
+    if [[ ! -f "$src" ]]; then
+      echo "Missing template: $src" >&2
+      missing=1
+      continue
+    fi
+
+    if [[ -f "$dest" && "$force" -ne 1 ]]; then
+      echo "Exists, skipping: $dest" >&2
+      continue
+    fi
+
+    mkdir -p "$(dirname "$dest")"
+    cp "$src" "$dest"
+    echo "Wrote $dest"
+    copied=1
+  done
+
+  if (( missing == 1 )); then
+    return 1
+  fi
+
+  if (( copied == 0 )); then
+    echo "No files copied. Use --force to overwrite existing files." >&2
+  fi
+}
+
+if [[ "${1:-}" == "init" ]]; then
+  shift
+  ralph_init_templates "$@"
+  exit $?
+fi
 
 if [[ "${1:-}" == "generate-prd" ]]; then
   shift
