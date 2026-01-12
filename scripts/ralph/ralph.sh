@@ -722,6 +722,18 @@ ralph_on_exit() {
   fi
   if [[ "${RALPH_RUN_STARTED:-0}" == "1" ]]; then
     ralph_run_summary "$exit_code"
+
+    # Send notification on run complete
+    if declare -F ralph_monitor_on_run_complete >/dev/null 2>&1; then
+      ralph_monitor_on_run_complete \
+        "${RALPH_RUN_STATUS:-unknown}" \
+        "${RALPH_STOP_REASON:-}" \
+        "${ITERATIONS_RUN:-0}" \
+        "${MAX_ITERATIONS:-0}"
+    fi
+  fi
+  if declare -F ralph_monitor_cleanup >/dev/null 2>&1; then
+    ralph_monitor_cleanup
   fi
 }
 
@@ -801,6 +813,20 @@ if [[ "${1:-}" == "generate-prd" ]]; then
   exit $?
 fi
 
+if [[ "${1:-}" == "monitor" ]]; then
+  shift
+  if [[ -f "$MODULE_DIR/monitor.sh" ]]; then
+    # shellcheck source=./modules/monitor.sh
+    source "$MODULE_DIR/monitor.sh"
+  else
+    echo "Missing module: $MODULE_DIR/monitor.sh" >&2
+    exit 1
+  fi
+
+  ralph_monitor_cli "$@"
+  exit $?
+fi
+
 ralph_log_init
 if ralph_verbose_enabled; then
   ralph_log "Verbose mode enabled."
@@ -865,6 +891,10 @@ fi
 if [[ -f "$MODULE_DIR/cost-control.sh" ]]; then
   # shellcheck source=./modules/cost-control.sh
   source "$MODULE_DIR/cost-control.sh"
+fi
+if [[ -f "$MODULE_DIR/monitor.sh" ]]; then
+  # shellcheck source=./modules/monitor.sh
+  source "$MODULE_DIR/monitor.sh"
 fi
 
 extract_progress_patterns() {
@@ -1325,6 +1355,11 @@ RALPH_RUN_STARTED=1
 RALPH_RUN_START_TS="$(date +%s)"
 INITIAL_COMPLETED="$(ralph_count_completed_stories "$PRD_FILE" || true)"
 TOTAL_STORIES="$(ralph_count_total_stories "$PRD_FILE" || true)"
+
+# Initialize monitor if enabled
+if declare -F ralph_monitor_init >/dev/null 2>&1; then
+  ralph_monitor_init
+fi
 ralph_log_verbose "Prompt file: $PROMPT_FILE"
 ralph_log_verbose "PRD file: $PRD_FILE"
 ralph_log_verbose "Progress file: $PROGRESS_FILE"
@@ -1408,6 +1443,11 @@ EOF
     else
       ralph_log "Story: none selected"
     fi
+  fi
+
+  # Notify monitor of iteration start
+  if declare -F ralph_monitor_on_iteration_start >/dev/null 2>&1; then
+    ralph_monitor_on_iteration_start "$i" "$MAX_ITERATIONS" "${STORY_ID:-}" "${STORY_TITLE:-}" "$ITERATION_TS"
   fi
 
   if [[ "$TESTS_MODE" -eq 0 && -n "$TARGET_STORY" ]]; then
@@ -1760,6 +1800,11 @@ EOF
   fi
   if ralph_verbose_enabled && ralph_is_int "$ITERATION_START_EPOCH" && ralph_is_int "$ITERATION_END_EPOCH"; then
     ralph_log_verbose "Iteration duration: $(ralph_format_duration $((ITERATION_END_EPOCH - ITERATION_START_EPOCH)) || true)"
+  fi
+
+  # Notify monitor of iteration end
+  if declare -F ralph_monitor_on_iteration_end >/dev/null 2>&1; then
+    ralph_monitor_on_iteration_end "$i" "$MAX_ITERATIONS" "${STORY_ID:-}" "${STORY_TITLE:-}" "$ITERATION_STATUS" "$ITERATION_TS"
   fi
 
   if ralph_external_enabled; then
