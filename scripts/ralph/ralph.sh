@@ -222,7 +222,8 @@ ralph_colorize_output() {
       if (tok ~ /^-/ || tok == "") {
         continue
       }
-      gsub(/^['\"]|['\"]$/, "", tok)
+      gsub(/^\"|\"$/, "", tok)
+      gsub(/^\047|\047$/, "", tok)
       if (tok ~ /\// || tok ~ /\.[A-Za-z0-9]{1,8}$/ || tok ~ /^[A-Za-z0-9._-]+$/) {
         if (files != "") {
           files = files ", "
