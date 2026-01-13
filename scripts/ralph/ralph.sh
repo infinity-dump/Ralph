@@ -112,6 +112,141 @@ ralph_print_box_line() {
   echo -e "${color}│${C_RESET} $text"
 }
 
+# Colorize agent output (Codex/Claude style)
+ralph_colorize_output() {
+  if ! ralph_colors_enabled; then
+    cat
+    return 0
+  fi
+
+  # Use awk for line-by-line colorization
+  awk -v reset="$C_RESET" \
+      -v dim="$C_DIM" \
+      -v cyan="$C_CYAN" \
+      -v bcyan="$C_BCYAN" \
+      -v yellow="$C_YELLOW" \
+      -v byellow="$C_BYELLOW" \
+      -v green="$C_GREEN" \
+      -v bgreen="$C_BGREEN" \
+      -v red="$C_RED" \
+      -v bred="$C_BRED" \
+      -v blue="$C_BLUE" \
+      -v bblue="$C_BBLUE" \
+      -v magenta="$C_MAGENTA" \
+      -v bmagenta="$C_BMAGENTA" \
+      -v white="$C_WHITE" \
+      -v bwhite="$C_BWHITE" \
+      -v bold="$C_BOLD" \
+  '
+  BEGIN {
+    in_code_block = 0
+  }
+
+  # Code blocks
+  /^```/ {
+    if (in_code_block) {
+      print dim $0 reset
+      in_code_block = 0
+    } else {
+      print dim $0 reset
+      in_code_block = 1
+    }
+    next
+  }
+
+  in_code_block {
+    print dim $0 reset
+    next
+  }
+
+  # Thinking tags
+  /^thinking$/ || /^<thinking>/ || /^<\/thinking>/ {
+    print magenta "💭 " $0 reset
+    next
+  }
+
+  # Exec commands
+  /^exec$/ {
+    print bblue "⚡ " $0 reset
+    next
+  }
+
+  # Command execution lines
+  /^\/bin\// || /^\/usr\// {
+    print blue "  → " $0 reset
+    next
+  }
+
+  # Success messages
+  /succeeded/ {
+    print bgreen "✓ " $0 reset
+    next
+  }
+
+  # Failed messages
+  /failed/ || /error/i || /Error/ {
+    print bred "✗ " $0 reset
+    next
+  }
+
+  # Headers (markdown style)
+  /^### / {
+    sub(/^### /, "")
+    print byellow "   ▸ " bold $0 reset
+    next
+  }
+
+  /^## / {
+    sub(/^## /, "")
+    print byellow "  ▸▸ " bold $0 reset
+    next
+  }
+
+  /^# / {
+    sub(/^# /, "")
+    print byellow " ▸▸▸ " bold $0 reset
+    next
+  }
+
+  # Bold text **text**
+  /\*\*[^*]+\*\*/ {
+    gsub(/\*\*([^*]+)\*\*/, bwhite "&" reset)
+    gsub(/\*\*/, "")
+    print $0
+    next
+  }
+
+  # Italic text *text* (single asterisk)
+  /\*[^*]+\*/ {
+    # Only process if not part of ** pattern
+    if (!match($0, /\*\*/)) {
+      gsub(/\*([^*]+)\*/, dim "&" reset)
+      gsub(/\*/, "")
+    }
+    print $0
+    next
+  }
+
+  # File paths
+  /^\// || /\.swift/ || /\.ts/ || /\.js/ || /\.py/ || /\.go/ || /\.rs/ {
+    print cyan $0 reset
+    next
+  }
+
+  # Line numbers with content (grep-style output)
+  /^[0-9]+:/ {
+    match($0, /^[0-9]+:/)
+    line_num = substr($0, 1, RLENGTH)
+    rest = substr($0, RLENGTH + 1)
+    print dim line_num reset rest
+    next
+  }
+
+  # Default
+  { print $0 }
+  '
+}
+
 RALPH_LOG_ACTIVE=0
 RALPH_RUN_STARTED=0
 RALPH_RUN_START_TS=""
@@ -613,10 +748,10 @@ ralph_tests_run() {
   ralph_log "Tests (${phase}): running ${cmd}"
   set +e
   if [[ "$RALPH_LOG_ACTIVE" -eq 1 ]]; then
-    (cd "$root" && eval "$cmd") 2>&1 | tee "$output_file"
+    (cd "$root" && eval "$cmd") 2>&1 | tee "$output_file" | ralph_colorize_output
     local status="${PIPESTATUS[0]:-0}"
   else
-    (cd "$root" && eval "$cmd") 2>&1 | tee /dev/stderr | tee "$output_file"
+    (cd "$root" && eval "$cmd") 2>&1 | tee "$output_file" | ralph_colorize_output
     local status="${PIPESTATUS[0]:-0}"
   fi
   set -e
@@ -1773,13 +1908,13 @@ EOF
     set +e
     if [[ "$AGENT_INPUT_MODE" == "file" ]]; then
       if [[ "$RALPH_LOG_ACTIVE" -eq 1 ]]; then
-        "${AGENT_CMD[@]}" "$PROMPT_INPUT" 2>&1 | tee "$OUTPUT_FILE"
+        # When logging to file, tee to both file and colorized stdout
+        "${AGENT_CMD[@]}" "$PROMPT_INPUT" 2>&1 | tee "$OUTPUT_FILE" | ralph_colorize_output
         PIPE_STATUS=("${PIPESTATUS[@]}")
         AGENT_EXIT="${PIPE_STATUS[0]:-0}"
       else
-        "${AGENT_CMD[@]}" "$PROMPT_INPUT" 2>&1 \
-          | tee /dev/stderr \
-          | tee "$OUTPUT_FILE"
+        # No log file, just colorize and save output
+        "${AGENT_CMD[@]}" "$PROMPT_INPUT" 2>&1 | tee "$OUTPUT_FILE" | ralph_colorize_output
         PIPE_STATUS=("${PIPESTATUS[@]}")
         AGENT_EXIT="${PIPE_STATUS[0]:-0}"
       fi
@@ -1789,13 +1924,13 @@ EOF
         AGENT_INVOKE+=("$AGENT_INPUT_ARG")
       fi
       if [[ "$RALPH_LOG_ACTIVE" -eq 1 ]]; then
-        cat "$PROMPT_INPUT" | "${AGENT_INVOKE[@]}" 2>&1 | tee "$OUTPUT_FILE"
+        # When logging to file, tee to both file and colorized stdout
+        cat "$PROMPT_INPUT" | "${AGENT_INVOKE[@]}" 2>&1 | tee "$OUTPUT_FILE" | ralph_colorize_output
         PIPE_STATUS=("${PIPESTATUS[@]}")
         AGENT_EXIT="${PIPE_STATUS[1]:-0}"
       else
-        cat "$PROMPT_INPUT" | "${AGENT_INVOKE[@]}" 2>&1 \
-          | tee /dev/stderr \
-          | tee "$OUTPUT_FILE"
+        # No log file, just colorize and save output
+        cat "$PROMPT_INPUT" | "${AGENT_INVOKE[@]}" 2>&1 | tee "$OUTPUT_FILE" | ralph_colorize_output
         PIPE_STATUS=("${PIPESTATUS[@]}")
         AGENT_EXIT="${PIPE_STATUS[1]:-0}"
       fi

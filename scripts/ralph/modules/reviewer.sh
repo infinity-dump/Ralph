@@ -72,9 +72,14 @@ PROMPT
   ralph_reviewer_log "Running adversarial review with ${reviewer_cmd[0]}"
 
   set +e
-  cat "$review_prompt" | "${reviewer_cmd[@]}" - 2>&1 \
-    | tee /dev/stderr \
-    | tee "$output_file"
+  if declare -F ralph_colorize_output >/dev/null 2>&1; then
+    cat "$review_prompt" | "${reviewer_cmd[@]}" - 2>&1 \
+      | tee "$output_file" \
+      | ralph_colorize_output
+  else
+    cat "$review_prompt" | "${reviewer_cmd[@]}" - 2>&1 \
+      | tee "$output_file"
+  fi
   local pipe_status=("${PIPESTATUS[@]}")
   set -e
 

@@ -131,9 +131,14 @@ EOF
   local output_file
   output_file="$(mktemp)"
   set +e
-  cat "$plan_prompt" | "${agent_cmd[@]}" - 2>&1 \
-    | tee /dev/stderr \
-    | tee "$output_file"
+  if declare -F ralph_colorize_output >/dev/null 2>&1; then
+    cat "$plan_prompt" | "${agent_cmd[@]}" - 2>&1 \
+      | tee "$output_file" \
+      | ralph_colorize_output
+  else
+    cat "$plan_prompt" | "${agent_cmd[@]}" - 2>&1 \
+      | tee "$output_file"
+  fi
   local pipe_status=("${PIPESTATUS[@]}")
   set -e
 
