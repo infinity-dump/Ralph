@@ -7,6 +7,111 @@ PRD_FILE="${PRD_FILE:-$SCRIPT_DIR/prd.json}"
 PROGRESS_FILE="${PROGRESS_FILE:-$SCRIPT_DIR/progress.txt}"
 MODULE_DIR="$SCRIPT_DIR/modules"
 TEMPLATE_DIR="$SCRIPT_DIR/templates"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TUI Colors and Styling
+# ═══════════════════════════════════════════════════════════════════════════════
+RALPH_NO_COLOR="${RALPH_NO_COLOR:-0}"
+
+ralph_colors_enabled() {
+  [[ "$RALPH_NO_COLOR" != "1" ]] && [[ -t 1 ]]
+}
+
+if ralph_colors_enabled; then
+  C_RESET='\033[0m'
+  C_BOLD='\033[1m'
+  C_DIM='\033[2m'
+  C_ITALIC='\033[3m'
+  C_UNDERLINE='\033[4m'
+  # Colors
+  C_RED='\033[0;31m'
+  C_GREEN='\033[0;32m'
+  C_YELLOW='\033[0;33m'
+  C_BLUE='\033[0;34m'
+  C_MAGENTA='\033[0;35m'
+  C_CYAN='\033[0;36m'
+  C_WHITE='\033[0;37m'
+  # Bright colors
+  C_BRED='\033[1;31m'
+  C_BGREEN='\033[1;32m'
+  C_BYELLOW='\033[1;33m'
+  C_BBLUE='\033[1;34m'
+  C_BMAGENTA='\033[1;35m'
+  C_BCYAN='\033[1;36m'
+  C_BWHITE='\033[1;37m'
+  # Background
+  C_BG_RED='\033[41m'
+  C_BG_GREEN='\033[42m'
+  C_BG_YELLOW='\033[43m'
+  C_BG_BLUE='\033[44m'
+else
+  C_RESET='' C_BOLD='' C_DIM='' C_ITALIC='' C_UNDERLINE=''
+  C_RED='' C_GREEN='' C_YELLOW='' C_BLUE='' C_MAGENTA='' C_CYAN='' C_WHITE=''
+  C_BRED='' C_BGREEN='' C_BYELLOW='' C_BBLUE='' C_BMAGENTA='' C_BCYAN='' C_BWHITE=''
+  C_BG_RED='' C_BG_GREEN='' C_BG_YELLOW='' C_BG_BLUE=''
+fi
+
+ralph_print_banner() {
+  if [[ "${RALPH_NO_BANNER:-}" == "1" ]]; then
+    return 0
+  fi
+  echo -e "${C_BYELLOW}"
+  cat << 'BANNER'
+    ╔═══════════════════════════════════════════════════════════════════════╗
+    ║                                                                       ║
+    ║      ██████╗  █████╗ ██╗     ██████╗ ██╗  ██╗                         ║
+    ║      ██╔══██╗██╔══██╗██║     ██╔══██╗██║  ██║                         ║
+    ║      ██████╔╝███████║██║     ██████╔╝███████║                         ║
+    ║      ██╔══██╗██╔══██║██║     ██╔═══╝ ██╔══██║                         ║
+    ║      ██║  ██║██║  ██║███████╗██║     ██║  ██║                         ║
+    ║      ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝  ╚═╝                         ║
+    ║                                                                       ║
+BANNER
+  echo -e "${C_CYAN}"
+  cat << 'BANNER'
+    ║                    ░░░░░░░░░░░░░░░░░░░░░                              ║
+    ║                 ░░░░░░░░░░░░░░░░░░░░░░░░░░░                           ║
+    ║               ░░░░░░░░░░░▓▓▓▓▓▓▓░░░░░░░░░░░░                          ║
+    ║              ░░░░░░░░▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░                          ║
+    ║             ░░░░░░░▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░                         ║
+    ║            ░░░░░░▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░                         ║
+    ║            ░░░░░▓▓▓▓▓▓●▓▓▓▓▓▓▓▓●▓▓▓▓▓▓▓░░░░░░                         ║
+    ║            ░░░░░▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░                         ║
+    ║            ░░░░░▓▓▓▓▓▓▓▓▓███▓▓▓▓▓▓▓▓▓▓▓░░░░░░                         ║
+    ║             ░░░░░▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░                         ║
+    ║              ░░░░░░▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░                          ║
+    ║               ░░░░░░░░▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░                            ║
+    ║                 ░░░░░░░░░░░░░░░░░░░░░░░░░                              ║
+BANNER
+  echo -e "${C_BMAGENTA}"
+  cat << 'BANNER'
+    ║                                                                       ║
+    ║           "Me fail English? That's unpossible!"                       ║
+    ║                                        - Ralph Wiggum                 ║
+    ║                                                                       ║
+    ╠═══════════════════════════════════════════════════════════════════════╣
+BANNER
+  echo -e "${C_BWHITE}"
+  cat << 'BANNER'
+    ║        🤖 Autonomous Agent Loop for Code Generation 🤖               ║
+    ╚═══════════════════════════════════════════════════════════════════════╝
+BANNER
+  echo -e "${C_RESET}"
+}
+
+ralph_print_separator() {
+  local char="${1:-─}"
+  local width="${2:-75}"
+  local color="${3:-$C_DIM}"
+  echo -e "${color}$(printf '%*s' "$width" '' | tr ' ' "$char")${C_RESET}"
+}
+
+ralph_print_box_line() {
+  local text="$1"
+  local color="${2:-$C_CYAN}"
+  echo -e "${color}│${C_RESET} $text"
+}
+
 RALPH_LOG_ACTIVE=0
 RALPH_RUN_STARTED=0
 RALPH_RUN_START_TS=""
@@ -45,17 +150,33 @@ ralph_verbose_enabled() {
 }
 
 ralph_log() {
-  echo "$*"
+  echo -e "${C_BWHITE}$*${C_RESET}"
 }
 
 ralph_log_error() {
-  echo "$*" >&2
+  echo -e "${C_BRED}✗ $*${C_RESET}" >&2
 }
 
 ralph_log_verbose() {
   if ralph_verbose_enabled; then
-    echo "$*"
+    echo -e "${C_DIM}$*${C_RESET}"
   fi
+}
+
+ralph_log_success() {
+  echo -e "${C_BGREEN}✓ $*${C_RESET}"
+}
+
+ralph_log_warn() {
+  echo -e "${C_BYELLOW}⚠ $*${C_RESET}"
+}
+
+ralph_log_info() {
+  echo -e "${C_BCYAN}ℹ $*${C_RESET}"
+}
+
+ralph_log_step() {
+  echo -e "${C_BBLUE}▸ $*${C_RESET}"
 }
 
 ralph_external_context() {
@@ -633,11 +754,36 @@ ralph_iteration_banner() {
   local status="$3"
   local ts="${4:-}"
 
+  local status_color="$C_BYELLOW"
+  local status_icon="⟳"
+  case "$status" in
+    running)
+      status_color="$C_BYELLOW"
+      status_icon="⟳"
+      ;;
+    success)
+      status_color="$C_BGREEN"
+      status_icon="✓"
+      ;;
+    failed)
+      status_color="$C_BRED"
+      status_icon="✗"
+      ;;
+  esac
+
+  local progress_bar=""
+  local progress_pct=$((iteration * 100 / max_iterations))
+  local filled=$((progress_pct / 5))
+  local empty=$((20 - filled))
+  progress_bar="${C_BGREEN}$(printf '█%.0s' $(seq 1 $filled 2>/dev/null) || true)${C_DIM}$(printf '░%.0s' $(seq 1 $empty 2>/dev/null) || true)${C_RESET}"
+
+  echo ""
+  echo -e "${C_BBLUE}╔══════════════════════════════════════════════════════════════════════════╗${C_RESET}"
+  echo -e "${C_BBLUE}║${C_RESET}  ${C_BWHITE}ITERATION${C_RESET} ${C_BCYAN}${iteration}${C_DIM}/${max_iterations}${C_RESET}  ${progress_bar}  ${status_color}${status_icon} ${status}${C_RESET}"
   if [[ -n "$ts" ]]; then
-    ralph_log "=== Iteration ${iteration} / ${max_iterations} | status: ${status} (${ts}) ==="
-  else
-    ralph_log "=== Iteration ${iteration} / ${max_iterations} | status: ${status} ==="
+    echo -e "${C_BBLUE}║${C_RESET}  ${C_DIM}${ts}${C_RESET}"
   fi
+  echo -e "${C_BBLUE}╚══════════════════════════════════════════════════════════════════════════╝${C_RESET}"
 }
 
 ralph_run_summary() {
@@ -662,53 +808,76 @@ ralph_run_summary() {
   completed="$(ralph_count_completed_stories "$PRD_FILE" || true)"
   total="$(ralph_count_total_stories "$PRD_FILE" || true)"
 
-  ralph_log "=== Ralph Summary ==="
-  ralph_log "Status: ${status}"
-  ralph_log "Iterations: ${ITERATIONS_RUN:-0} / ${MAX_ITERATIONS:-unknown}"
+  local status_color="$C_BRED"
+  local status_icon="✗"
+  case "$status" in
+    success)
+      status_color="$C_BGREEN"
+      status_icon="✓"
+      ;;
+    stopped|paused)
+      status_color="$C_BYELLOW"
+      status_icon="⏸"
+      ;;
+  esac
+
+  echo ""
+  echo -e "${C_BMAGENTA}╔══════════════════════════════════════════════════════════════════════════╗${C_RESET}"
+  echo -e "${C_BMAGENTA}║${C_RESET}  ${C_BWHITE}📊 RALPH SUMMARY${C_RESET}"
+  echo -e "${C_BMAGENTA}╠══════════════════════════════════════════════════════════════════════════╣${C_RESET}"
+  echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Status:${C_RESET}            ${status_color}${status_icon} ${status}${C_RESET}"
+  echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Iterations:${C_RESET}        ${C_BCYAN}${ITERATIONS_RUN:-0}${C_DIM}/${MAX_ITERATIONS:-unknown}${C_RESET}"
 
   if [[ -n "$completed" ]]; then
     if [[ -n "$total" ]]; then
-      ralph_log "Completed stories: ${completed} / ${total}"
+      echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Completed stories:${C_RESET} ${C_BGREEN}${completed}${C_DIM}/${total}${C_RESET}"
     else
-      ralph_log "Completed stories: ${completed}"
+      echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Completed stories:${C_RESET} ${C_BGREEN}${completed}${C_RESET}"
     fi
 
     if ralph_is_int "${INITIAL_COMPLETED:-}" && ralph_is_int "$completed"; then
       local delta=$((completed - INITIAL_COMPLETED))
       if (( delta >= 0 )); then
-        ralph_log "Completed this run: ${delta}"
+        echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Completed this run:${C_RESET} ${C_BGREEN}+${delta}${C_RESET}"
       fi
     fi
   else
-    ralph_log "Completed stories: unavailable (jq not found)"
+    echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Completed stories:${C_RESET} ${C_DIM}unavailable (jq not found)${C_RESET}"
   fi
 
   if [[ -n "$duration" ]]; then
-    ralph_log "Elapsed time: ${duration}"
+    echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Elapsed time:${C_RESET}      ${C_BCYAN}${duration}${C_RESET}"
   fi
 
-  local cost_line="Cost estimate: unavailable"
+  local cost_line="${C_DIM}unavailable${C_RESET}"
   if [[ -n "${RALPH_COST_TOTAL_CENTS:-}" && -n "${RALPH_COST_ENTRIES:-}" ]]; then
     if declare -F ralph_cost_control_format_cents >/dev/null 2>&1; then
       local cost_fmt
       cost_fmt="$(ralph_cost_control_format_cents "$RALPH_COST_TOTAL_CENTS" || true)"
       if [[ -n "$cost_fmt" ]]; then
-        cost_line="Cost estimate: ${cost_fmt}"
+        cost_line="${C_BYELLOW}${cost_fmt}${C_RESET}"
         if ralph_is_int "${RALPH_COST_ENTRIES:-}" && ralph_is_int "${RALPH_COST_ITERATION_COUNT:-}"; then
-          cost_line="${cost_line} (tracked iterations: ${RALPH_COST_ENTRIES}/${RALPH_COST_ITERATION_COUNT})"
+          cost_line="${cost_line} ${C_DIM}(tracked: ${RALPH_COST_ENTRIES}/${RALPH_COST_ITERATION_COUNT})${C_RESET}"
         fi
       fi
     fi
   fi
-  ralph_log "$cost_line"
+  echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Cost estimate:${C_RESET}     ${cost_line}"
 
   if [[ "${RALPH_STOP_REASON:-}" == "stuck_story" ]]; then
-    ralph_log "Failure analysis: story ${RALPH_CB_STUCK_STORY_ID:-unknown} failed ${RALPH_CB_STUCK_FAILURES:-?} times; consider splitting the story or reviewing dependencies."
+    echo -e "${C_BMAGENTA}╠══════════════════════════════════════════════════════════════════════════╣${C_RESET}"
+    echo -e "${C_BMAGENTA}║${C_RESET}  ${C_BRED}⚠ FAILURE ANALYSIS${C_RESET}"
+    echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Story${C_RESET} ${C_BYELLOW}${RALPH_CB_STUCK_STORY_ID:-unknown}${C_RESET} ${C_DIM}failed${C_RESET} ${C_BRED}${RALPH_CB_STUCK_FAILURES:-?}${C_RESET} ${C_DIM}times${C_RESET}"
+    echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Consider splitting the story or reviewing dependencies.${C_RESET}"
   fi
 
   if [[ "$exit_code" -ne 0 && -n "${LAST_FAILURE_REASON:-}" ]]; then
-    ralph_log "Last failure: ${LAST_FAILURE_REASON}"
+    echo -e "${C_BMAGENTA}╠══════════════════════════════════════════════════════════════════════════╣${C_RESET}"
+    echo -e "${C_BMAGENTA}║${C_RESET}  ${C_BRED}Last failure:${C_RESET} ${LAST_FAILURE_REASON}"
   fi
+
+  echo -e "${C_BMAGENTA}╚══════════════════════════════════════════════════════════════════════════╝${C_RESET}"
+  echo ""
 }
 
 ralph_on_exit() {
@@ -1350,7 +1519,7 @@ if [[ "$RESUME" -eq 1 ]]; then
   fi
 fi
 
-ralph_log "Starting Ralph (max iterations: $MAX_ITERATIONS)"
+ralph_print_banner
 RALPH_RUN_STARTED=1
 RALPH_RUN_START_TS="$(date +%s)"
 INITIAL_COMPLETED="$(ralph_count_completed_stories "$PRD_FILE" || true)"
@@ -1360,6 +1529,19 @@ TOTAL_STORIES="$(ralph_count_total_stories "$PRD_FILE" || true)"
 if declare -F ralph_monitor_init >/dev/null 2>&1; then
   ralph_monitor_init
 fi
+
+echo -e "${C_BGREEN}╔══════════════════════════════════════════════════════════════════════════╗${C_RESET}"
+echo -e "${C_BGREEN}║${C_RESET}  ${C_BWHITE}🚀 STARTING RALPH${C_RESET}"
+echo -e "${C_BGREEN}╠══════════════════════════════════════════════════════════════════════════╣${C_RESET}"
+echo -e "${C_BGREEN}║${C_RESET}  ${C_DIM}Max iterations:${C_RESET}  ${C_BCYAN}$MAX_ITERATIONS${C_RESET}"
+echo -e "${C_BGREEN}║${C_RESET}  ${C_DIM}Mode:${C_RESET}            ${C_BCYAN}${RALPH_MODE:-stories}${C_RESET}"
+echo -e "${C_BGREEN}║${C_RESET}  ${C_DIM}Agent:${C_RESET}           ${C_BCYAN}${RALPH_AGENT_PRESET:-codex}${C_RESET}"
+if [[ -n "$TOTAL_STORIES" ]]; then
+  echo -e "${C_BGREEN}║${C_RESET}  ${C_DIM}Stories:${C_RESET}         ${C_BCYAN}${INITIAL_COMPLETED:-0}${C_DIM}/${TOTAL_STORIES} completed${C_RESET}"
+fi
+echo -e "${C_BGREEN}╚══════════════════════════════════════════════════════════════════════════╝${C_RESET}"
+echo ""
+
 ralph_log_verbose "Prompt file: $PROMPT_FILE"
 ralph_log_verbose "PRD file: $PRD_FILE"
 ralph_log_verbose "Progress file: $PROGRESS_FILE"
@@ -1419,7 +1601,7 @@ for i in $(seq "$START_ITERATION" "$MAX_ITERATIONS"); do
     STORY_DEPS="$(jq -c '.dependencies // []' <<<"$STORY_SELECTION" 2>/dev/null || true)"
 
     if [[ -n "$STORY_JSON" ]]; then
-      ralph_log "Story: ${STORY_ID:-unknown} - ${STORY_TITLE:-untitled}"
+      echo -e "${C_BCYAN}  📋 Story:${C_RESET} ${C_BYELLOW}${STORY_ID:-unknown}${C_RESET} ${C_DIM}-${C_RESET} ${C_BWHITE}${STORY_TITLE:-untitled}${C_RESET}"
       ralph_log_verbose "Story status: ${STORY_STATUS:-n/a} | priority: ${STORY_PRIORITY:-n/a} | deps: ${STORY_DEPS:-[]}"
       STORY_CONTEXT=$(
         cat <<EOF
@@ -1439,9 +1621,9 @@ EOF
 
   if [[ -z "$STORY_ID" ]]; then
     if [[ "$TESTS_MODE" -eq 1 ]]; then
-      ralph_log "Story: skipped (tests mode)"
+      echo -e "${C_DIM}  📋 Story: skipped (tests mode)${C_RESET}"
     else
-      ralph_log "Story: none selected"
+      echo -e "${C_BYELLOW}  📋 Story: none selected${C_RESET}"
     fi
   fi
 
@@ -1504,7 +1686,7 @@ EOF
           ralph_hook_export_env "post" "$i" "$MAX_ITERATIONS" "$ITERATION_TS" "success" "tests_passing"
           ralph_hook_run "${RALPH_POST_HOOK:-}" "post" "${REPO_ROOT:-}" || true
         fi
-        ralph_log "All tests passing."
+        ralph_log_success "All tests passing! 🎉"
         exit 0
       fi
     else
@@ -1713,7 +1895,7 @@ EOF
         ralph_hook_export_env "post" "$i" "$MAX_ITERATIONS" "$ITERATION_TS" "success" "tests_passing"
         ralph_hook_run "${RALPH_POST_HOOK:-}" "post" "${REPO_ROOT:-}" || true
       fi
-      ralph_log "All tests passing."
+      ralph_log_success "All tests passing! 🎉"
       exit 0
     fi
   fi
@@ -1741,7 +1923,7 @@ EOF
           ralph_hook_export_env "post" "$i" "$MAX_ITERATIONS" "$ITERATION_TS" "success" "all_stories_completed"
           ralph_hook_run "${RALPH_POST_HOOK:-}" "post" "${REPO_ROOT:-}" || true
         fi
-        ralph_log "Done!"
+        ralph_log_success "All stories completed! 🎉"
         exit 0
       else
         echo "Ignoring COMPLETE because pending stories remain in $PRD_FILE" >&2
@@ -1794,9 +1976,9 @@ EOF
   fi
   ralph_iteration_banner "$i" "$MAX_ITERATIONS" "$ITERATION_STATUS"
   if [[ "$ITERATION_FAILED" -eq 1 ]]; then
-    ralph_log "Iteration result: failed (${FAILURE_REASON})"
+    ralph_log_error "Iteration result: failed (${FAILURE_REASON})"
   else
-    ralph_log "Iteration result: success"
+    ralph_log_success "Iteration result: success"
   fi
   if ralph_verbose_enabled && ralph_is_int "$ITERATION_START_EPOCH" && ralph_is_int "$ITERATION_END_EPOCH"; then
     ralph_log_verbose "Iteration duration: $(ralph_format_duration $((ITERATION_END_EPOCH - ITERATION_START_EPOCH)) || true)"
@@ -1883,5 +2065,5 @@ if declare -F ralph_circuit_breaker_report >/dev/null 2>&1; then
 fi
 RALPH_RUN_STATUS="stopped"
 RALPH_STOP_REASON="max_iterations"
-ralph_log "Max iterations reached"
+ralph_log_warn "Max iterations reached"
 exit 1
