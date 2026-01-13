@@ -87,18 +87,35 @@ nano scripts/ralph/prompt.md
 ./ralph.sh init --force
 ```
 
-### Generate PRD
+### Generate PRD (AI-Powered)
+
+The `generate-prd` command uses AI to analyze your repository and generate intelligent user stories:
 
 ```bash
-# Generate a PRD from a feature description
+# Generate a PRD - AI analyzes repo structure, tech stack, and existing code
 ./ralph.sh generate-prd "Add user authentication with OAuth support"
 
-# Use AI agent to generate more detailed PRD
-RALPH_PRD_GENERATOR_AGENT=1 ./ralph.sh generate-prd "Add user authentication"
+# Update existing PRD with new stories (preserves completed stories)
+./ralph.sh generate-prd "Add password reset functionality"
+
+# Use Claude instead of Codex
+RALPH_AGENT=claude ./ralph.sh generate-prd "Implement video recording"
 
 # Read description from stdin
-echo "Add dark mode toggle" | ./ralph.sh generate-prd
+echo "Add dark mode support" | ./ralph.sh generate-prd
 ```
+
+**What the AI analyzes:**
+- Repository structure and tech stack (Node.js, Python, Swift, Go, etc.)
+- Existing source files and patterns
+- README and documentation
+- Existing PRD stories (for updates)
+
+**What it generates:**
+- 5-15 atomic user stories with proper dependencies
+- Clear acceptance criteria (2-4 per story)
+- Effort estimates (small/medium/large)
+- Suggested files to modify
 
 ### Monitor Commands
 

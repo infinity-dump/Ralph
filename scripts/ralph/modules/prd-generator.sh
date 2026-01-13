@@ -1,7 +1,35 @@
-# Ralph PRD generator helpers (sourced by ralph.sh).
+# Ralph PRD generator - AI-powered user story generation (sourced by ralph.sh).
 
 ralph_prd_generator_log() {
-  echo "[prd-generator] $*"
+  if declare -F ralph_log_info >/dev/null 2>&1; then
+    ralph_log_info "[prd-gen] $*"
+  else
+    echo "[prd-generator] $*"
+  fi
+}
+
+ralph_prd_generator_log_step() {
+  if declare -F ralph_log_step >/dev/null 2>&1; then
+    ralph_log_step "[prd-gen] $*"
+  else
+    echo "  > $*"
+  fi
+}
+
+ralph_prd_generator_log_success() {
+  if declare -F ralph_log_success >/dev/null 2>&1; then
+    ralph_log_success "[prd-gen] $*"
+  else
+    echo "✓ $*"
+  fi
+}
+
+ralph_prd_generator_log_error() {
+  if declare -F ralph_log_error >/dev/null 2>&1; then
+    ralph_log_error "[prd-gen] $*"
+  else
+    echo "✗ $*" >&2
+  fi
 }
 
 ralph_prd_generator_trim() {
@@ -10,117 +38,14 @@ ralph_prd_generator_trim() {
   echo "$text"
 }
 
-ralph_prd_generator_short_label() {
-  local text="$1"
-  text="$(ralph_prd_generator_trim "$text")"
-  text="${text//$'\n'/ }"
-  text="$(echo "$text" | tr -s ' ')"
-
-  local max_len="${RALPH_PRD_TITLE_MAX:-60}"
-  if (( ${#text} > max_len )); then
-    text="${text:0:max_len}"
-    text="${text% *}"
-  fi
-
-  if [[ -z "$text" ]]; then
-    text="New Feature"
-  fi
-
-  echo "$text"
-}
-
-ralph_prd_generator_json_escape() {
-  local text="$1"
-  text="${text//\\/\\\\}"
-  text="${text//\"/\\\"}"
-  text="${text//$'\n'/\\n}"
-  text="${text//$'\r'/\\r}"
-  text="${text//$'\t'/\\t}"
-  echo "$text"
-}
-
-ralph_prd_generator_json_array() {
-  local out=""
-  local item
-  for item in "$@"; do
-    local escaped
-    escaped="$(ralph_prd_generator_json_escape "$item")"
-    if [[ -n "$out" ]]; then
-      out+=", "
-    fi
-    out+="\"${escaped}\""
-  done
-  echo "[${out}]"
-}
-
-ralph_prd_generator_story_json() {
-  local id="$1"
-  local title="$2"
-  local description="$3"
-  local priority="$4"
-  local deps_json="$5"
-  local criteria_json="$6"
-
-  printf '  {\n'
-  printf '    "id": "%s",\n' "$(ralph_prd_generator_json_escape "$id")"
-  printf '    "title": "%s",\n' "$(ralph_prd_generator_json_escape "$title")"
-  printf '    "description": "%s",\n' "$(ralph_prd_generator_json_escape "$description")"
-  printf '    "priority": %s,\n' "$priority"
-  printf '    "acceptanceCriteria": %s,\n' "$criteria_json"
-  printf '    "passes": false,\n'
-  printf '    "effort": "small",\n'
-  printf '    "files": [],\n'
-  printf '    "dependencies": %s,\n' "$deps_json"
-  printf '    "status": "pending"\n'
-  printf '  }'
-}
-
-ralph_prd_generator_reset_state() {
-  RALPH_PRD_STORIES=()
-  RALPH_PRD_STORY_INDEX=1
-  RALPH_PRD_LAST_ID=""
-  RALPH_PRD_MAX_STORIES="${RALPH_PRD_MAX_STORIES:-7}"
-}
-
-ralph_prd_generator_add_story() {
-  local title="$1"
-  local description="$2"
-  local priority="$3"
-  local deps_name="$4"
-  local criteria_name="$5"
-
-  if (( RALPH_PRD_STORY_INDEX > RALPH_PRD_MAX_STORIES )); then
-    return 1
-  fi
-
-  local -n deps_ref="$deps_name"
-  local -n criteria_ref="$criteria_name"
-  local id
-  id="US-$(printf '%03d' "$RALPH_PRD_STORY_INDEX")"
-  RALPH_PRD_STORY_INDEX=$((RALPH_PRD_STORY_INDEX + 1))
-
-  local deps_json
-  deps_json="$(ralph_prd_generator_json_array "${deps_ref[@]}")"
-  local criteria_json
-  criteria_json="$(ralph_prd_generator_json_array "${criteria_ref[@]}")"
-
-  RALPH_PRD_STORIES+=("$(ralph_prd_generator_story_json "$id" "$title" "$description" "$priority" "$deps_json" "$criteria_json")")
-  RALPH_PRD_LAST_ID="$id"
-  return 0
-}
-
-ralph_prd_generator_should_use_agent() {
-  case "${RALPH_PRD_GENERATOR_AGENT:-}" in
-    1|true|TRUE|yes|YES)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
+ralph_prd_generator_repo_root() {
+  git rev-parse --show-toplevel 2>/dev/null || pwd
 }
 
 ralph_prd_generator_resolve_agent_cmd() {
+  # Use same agent preset system as main ralph.sh
+  local preset="${RALPH_AGENT:-${RALPH_PRD_AGENT:-codex}}"
+
   if [[ -n "${RALPH_PRD_AGENT_CMD:-}" ]]; then
     echo "${RALPH_PRD_AGENT_CMD}"
     return 0
@@ -131,252 +56,332 @@ ralph_prd_generator_resolve_agent_cmd() {
     return 0
   fi
 
-  echo "codex exec --dangerously-bypass-approvals-and-sandbox"
+  case "$preset" in
+    codex)
+      echo "codex exec --dangerously-bypass-approvals-and-sandbox"
+      ;;
+    claude)
+      echo "claude --dangerously-skip-permissions"
+      ;;
+    aider)
+      echo "aider --yes --message"
+      ;;
+    *)
+      echo "codex exec --dangerously-bypass-approvals-and-sandbox"
+      ;;
+  esac
 }
 
-ralph_prd_generator_generate_with_agent() {
-  local description="$1"
-  local output="$2"
-  local agent_cmd
-  agent_cmd="$(ralph_prd_generator_resolve_agent_cmd)"
+ralph_prd_generator_get_agent_input_mode() {
+  local preset="${RALPH_AGENT:-${RALPH_PRD_AGENT:-codex}}"
+  case "$preset" in
+    aider)
+      echo "arg"
+      ;;
+    *)
+      echo "stdin"
+      ;;
+  esac
+}
 
-  # shellcheck disable=SC2206
-  local cmd=(${agent_cmd})
-  if [[ "${#cmd[@]}" -eq 0 ]]; then
-    ralph_prd_generator_log "Agent command not configured; skipping agent generation."
-    return 1
+ralph_prd_generator_analyze_repo() {
+  local root="$1"
+  local analysis=""
+
+  ralph_prd_generator_log_step "Analyzing repository structure..."
+
+  # Get basic repo info
+  local repo_name
+  repo_name="$(basename "$root")"
+  analysis+="Repository: $repo_name\n"
+
+  # Detect project type and tech stack
+  local tech_stack=""
+  if [[ -f "$root/package.json" ]]; then
+    tech_stack+="Node.js/JavaScript"
+    if [[ -f "$root/tsconfig.json" ]]; then
+      tech_stack+=" (TypeScript)"
+    fi
+    if grep -q "react" "$root/package.json" 2>/dev/null; then
+      tech_stack+=", React"
+    fi
+    if grep -q "next" "$root/package.json" 2>/dev/null; then
+      tech_stack+=", Next.js"
+    fi
+    if grep -q "vue" "$root/package.json" 2>/dev/null; then
+      tech_stack+=", Vue"
+    fi
+  fi
+  if [[ -f "$root/pyproject.toml" ]] || [[ -f "$root/requirements.txt" ]]; then
+    [[ -n "$tech_stack" ]] && tech_stack+=", "
+    tech_stack+="Python"
+    if grep -q "django" "$root/requirements.txt" 2>/dev/null || grep -q "django" "$root/pyproject.toml" 2>/dev/null; then
+      tech_stack+=", Django"
+    fi
+    if grep -q "fastapi" "$root/requirements.txt" 2>/dev/null || grep -q "fastapi" "$root/pyproject.toml" 2>/dev/null; then
+      tech_stack+=", FastAPI"
+    fi
+  fi
+  if [[ -f "$root/go.mod" ]]; then
+    [[ -n "$tech_stack" ]] && tech_stack+=", "
+    tech_stack+="Go"
+  fi
+  if [[ -f "$root/Cargo.toml" ]]; then
+    [[ -n "$tech_stack" ]] && tech_stack+=", "
+    tech_stack+="Rust"
+  fi
+  if [[ -f "$root/Gemfile" ]]; then
+    [[ -n "$tech_stack" ]] && tech_stack+=", "
+    tech_stack+="Ruby"
+    if grep -q "rails" "$root/Gemfile" 2>/dev/null; then
+      tech_stack+=", Rails"
+    fi
+  fi
+  if ls "$root"/*.xcodeproj "$root"/*.xcworkspace 2>/dev/null | head -1 >/dev/null; then
+    [[ -n "$tech_stack" ]] && tech_stack+=", "
+    tech_stack+="iOS/Swift"
+  fi
+  if [[ -f "$root/build.gradle" ]] || [[ -f "$root/pom.xml" ]]; then
+    [[ -n "$tech_stack" ]] && tech_stack+=", "
+    tech_stack+="Java"
+    if [[ -f "$root/build.gradle.kts" ]]; then
+      tech_stack+="/Kotlin"
+    fi
   fi
 
-  local prompt
-  prompt=$(cat <<'PROMPT'
-You are generating a prd.json for Ralph.
-Feature description:
-"""
-PROMPT
-)
-  prompt+="${description}"
-  prompt+=$(cat <<'PROMPT'
-"""
+  [[ -z "$tech_stack" ]] && tech_stack="Unknown"
+  analysis+="Tech Stack: $tech_stack\n\n"
 
-Return ONLY valid JSON with this shape:
+  # Get directory structure (top 2 levels)
+  analysis+="Directory Structure:\n"
+  analysis+="$(find "$root" -maxdepth 2 -type d \
+    -not -path '*/.git*' \
+    -not -path '*/node_modules*' \
+    -not -path '*/.venv*' \
+    -not -path '*/venv*' \
+    -not -path '*/__pycache__*' \
+    -not -path '*/dist*' \
+    -not -path '*/build*' \
+    -not -path '*/.next*' \
+    -not -path '*/target*' \
+    2>/dev/null | head -50 | sed "s|$root|.|g")\n\n"
+
+  # Get key source files
+  analysis+="Key Source Files:\n"
+  local src_files
+  src_files="$(find "$root" -type f \( \
+    -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" \
+    -o -name "*.py" -o -name "*.go" -o -name "*.rs" -o -name "*.swift" \
+    -o -name "*.java" -o -name "*.kt" -o -name "*.rb" \
+  \) \
+    -not -path '*/.git*' \
+    -not -path '*/node_modules*' \
+    -not -path '*/.venv*' \
+    -not -path '*/dist*' \
+    -not -path '*/build*' \
+    2>/dev/null | head -30 | sed "s|$root|.|g")"
+  analysis+="$src_files\n\n"
+
+  # Check for existing PRD
+  if [[ -f "$root/scripts/ralph/prd.json" ]]; then
+    analysis+="Existing PRD found at scripts/ralph/prd.json\n"
+    if command -v jq >/dev/null 2>&1; then
+      local existing_stories
+      existing_stories="$(jq -r '.userStories[]? | "- \(.id): \(.title) [passes=\(.passes)]"' "$root/scripts/ralph/prd.json" 2>/dev/null || true)"
+      if [[ -n "$existing_stories" ]]; then
+        analysis+="Existing User Stories:\n$existing_stories\n"
+      fi
+    fi
+    analysis+="\n"
+  fi
+
+  # Get README content if exists
+  if [[ -f "$root/README.md" ]]; then
+    analysis+="README Summary:\n"
+    analysis+="$(head -50 "$root/README.md" 2>/dev/null)\n\n"
+  fi
+
+  echo -e "$analysis"
+}
+
+ralph_prd_generator_build_prompt() {
+  local description="$1"
+  local analysis="$2"
+  local existing_prd="$3"
+  local mode="$4"  # "create" or "update"
+
+  local prompt=""
+
+  prompt+="# Ralph PRD Generator - AI-Powered User Story Creation
+
+You are an expert software architect and product manager. Your task is to analyze a codebase and generate a Product Requirements Document (PRD) with well-structured user stories.
+
+## Repository Analysis
+$analysis
+
+## User Request
+$description
+
+## Task
+"
+
+  if [[ "$mode" == "update" ]] && [[ -n "$existing_prd" ]]; then
+    prompt+="UPDATE the existing PRD by:
+1. Keeping completed stories (passes=true) as-is
+2. Analyzing incomplete stories and improving them if needed
+3. Adding new user stories based on the user's request
+4. Ensuring proper dependency ordering
+
+Existing PRD:
+\`\`\`json
+$existing_prd
+\`\`\`
+
+"
+  else
+    prompt+="CREATE a new PRD with intelligent user stories that:
+1. Break down the feature into atomic, implementable units
+2. Order stories by dependency (foundational first)
+3. Include clear acceptance criteria for each story
+4. Consider the existing codebase patterns and conventions
+
+"
+  fi
+
+  prompt+="## Output Requirements
+
+Return ONLY valid JSON matching this exact schema:
+\`\`\`json
 {
-  "title": string,
-  "version": string,
-  "status": string,
-  "created": "YYYY-MM-DD",
-  "updated": "YYYY-MM-DD",
-  "overview": { "summary": string },
-  "userStories": [
+  \"title\": \"PRD: <descriptive title>\",
+  \"version\": \"1.0.0\",
+  \"status\": \"active\",
+  \"created\": \"YYYY-MM-DD\",
+  \"updated\": \"YYYY-MM-DD\",
+  \"author\": \"ralph-ai\",
+  \"overview\": {
+    \"summary\": \"<1-2 sentence summary of the PRD scope>\"
+  },
+  \"userStories\": [
     {
-      "id": "US-001",
-      "title": string,
-      "description": string,
-      "priority": number,
-      "acceptanceCriteria": [string, ...],
-      "passes": false,
-      "effort": "small"|"medium"|"large",
-      "files": [],
-      "dependencies": ["US-###", ...],
-      "status": "pending"
+      \"id\": \"US-001\",
+      \"title\": \"<short, action-oriented title>\",
+      \"description\": \"<detailed description of what needs to be implemented>\",
+      \"priority\": 1,
+      \"acceptanceCriteria\": [
+        \"<specific, testable criterion 1>\",
+        \"<specific, testable criterion 2>\",
+        \"<specific, testable criterion 3>\"
+      ],
+      \"passes\": false,
+      \"effort\": \"small|medium|large\",
+      \"files\": [\"<likely files to modify>\"],
+      \"dependencies\": [],
+      \"status\": \"pending\"
     }
   ]
 }
-Requirements:
-- Break into 3-7 atomic stories (one feature per story).
-- Each story includes 2-4 clear acceptance criteria.
-- Keep stories small enough to complete in 1-3 iterations.
-PROMPT
-)
+\`\`\`
 
-  local response
-  response="$(printf "%s" "$prompt" | "${cmd[@]}" - 2>/dev/null || true)"
+## Story Creation Guidelines
 
-  if [[ -z "$response" ]]; then
-    ralph_prd_generator_log "Agent returned empty response."
-    return 1
+1. **Atomic Stories**: Each story should be completable in 1-3 AI iterations
+2. **Clear Acceptance Criteria**: 2-4 specific, testable criteria per story
+3. **Proper Dependencies**: Foundation stories (data models, utils) come first
+4. **Priority Order**: 1=highest priority, larger numbers=lower priority
+5. **Effort Estimation**:
+   - small: <100 lines of code, single file
+   - medium: 100-300 lines, 2-3 files
+   - large: 300+ lines, multiple files
+6. **Files Array**: List specific files that will likely need changes
+7. **Story Types to Consider**:
+   - Data models / schemas
+   - Core business logic
+   - API endpoints / services
+   - UI components
+   - Integration / glue code
+   - Tests / validation
+   - Documentation (only if explicitly needed)
+
+Generate 5-15 well-structured user stories. Return ONLY the JSON, no explanations."
+
+  echo "$prompt"
+}
+
+ralph_prd_generator_extract_json() {
+  local response="$1"
+
+  # Try to extract JSON from response
+  # First, try to find a complete JSON object
+  local json=""
+
+  # Look for JSON between ```json and ``` markers
+  json="$(echo "$response" | sed -n '/```json/,/```/p' | sed '1d;$d')"
+
+  if [[ -z "$json" ]]; then
+    # Look for JSON between ``` markers (no language specified)
+    json="$(echo "$response" | sed -n '/```/,/```/p' | sed '1d;$d')"
   fi
 
+  if [[ -z "$json" ]]; then
+    # Try to find raw JSON starting with {
+    json="$(echo "$response" | grep -Pzo '\{[\s\S]*\}' 2>/dev/null | tr '\0' '\n' || true)"
+  fi
+
+  if [[ -z "$json" ]]; then
+    # Last resort: assume entire response is JSON
+    json="$response"
+  fi
+
+  # Validate JSON
   if command -v jq >/dev/null 2>&1; then
-    if echo "$response" | jq -e . >/dev/null 2>&1; then
-      mkdir -p "$(dirname "$output")"
-      echo "$response" > "$output"
+    if echo "$json" | jq -e . >/dev/null 2>&1; then
+      echo "$json" | jq .
       return 0
     fi
   fi
 
-  ralph_prd_generator_log "Agent output was not valid JSON; falling back."
-  return 1
+  # Return raw if jq not available
+  echo "$json"
 }
 
-ralph_prd_generator_generate_template() {
-  local description="$1"
-  local output="$2"
-  local clean_desc
-  clean_desc="$(ralph_prd_generator_trim "$description")"
+ralph_prd_generator_run_agent() {
+  local prompt="$1"
+  local agent_cmd
+  agent_cmd="$(ralph_prd_generator_resolve_agent_cmd)"
+  local input_mode
+  input_mode="$(ralph_prd_generator_get_agent_input_mode)"
 
-  local short_label
-  short_label="$(ralph_prd_generator_short_label "$clean_desc")"
-
-  local date
-  date="$(date +%Y-%m-%d)"
-
-  local desc_lower
-  desc_lower="$(echo "$clean_desc" | tr '[:upper:]' '[:lower:]')"
-
-  local needs_data=0
-  local needs_api=0
-  local needs_ui=0
-  local needs_cli=0
-
-  if echo "$desc_lower" | grep -Eq "database|db|schema|migration|storage|persist"; then
-    needs_data=1
-  fi
-  if echo "$desc_lower" | grep -Eq "api|endpoint|service|integration"; then
-    needs_api=1
-  fi
-  if echo "$desc_lower" | grep -Eq "ui|frontend|page|screen|component|dashboard"; then
-    needs_ui=1
-  fi
-  if echo "$desc_lower" | grep -Eq "cli|command|terminal"; then
-    needs_cli=1
+  # shellcheck disable=SC2206
+  local cmd=(${agent_cmd})
+  if [[ "${#cmd[@]}" -eq 0 ]]; then
+    ralph_prd_generator_log_error "Agent command not configured"
+    return 1
   fi
 
-  ralph_prd_generator_reset_state
+  ralph_prd_generator_log_step "Running AI agent (${cmd[0]})..."
 
-  local data_id=""
-  local core_id=""
-  local api_id=""
-  local ui_id=""
-  local cli_id=""
-  local -a deps
-  local -a criteria
+  local response=""
+  local temp_file
+  temp_file="$(mktemp)"
 
-  if (( needs_data == 1 )); then
-    deps=()
-    criteria=(
-      "Define data model fields and constraints for ${short_label}"
-      "Add migrations or storage setup if needed"
-      "Validate inputs before persistence"
-    )
-    if ralph_prd_generator_add_story "Data model for ${short_label}" "Create the data structures needed for ${short_label}." 1 deps criteria; then
-      data_id="$RALPH_PRD_LAST_ID"
-    else
-      ralph_prd_generator_log "Skipping data model story (max stories reached)."
-    fi
+  if [[ "$input_mode" == "arg" ]]; then
+    # Aider-style: pass prompt as argument
+    "${cmd[@]}" "$prompt" 2>&1 | tee "$temp_file"
+  else
+    # Codex/Claude style: pass prompt via stdin
+    printf "%s" "$prompt" | "${cmd[@]}" - 2>&1 | tee "$temp_file"
   fi
 
-  deps=()
-  if [[ -n "$data_id" ]]; then
-    deps=("$data_id")
-  fi
-  criteria=(
-    "Implement the primary workflow for ${short_label}"
-    "Handle expected errors and edge cases"
-    "Confirm behavior matches the requested feature"
-  )
-  if ralph_prd_generator_add_story "Core ${short_label}" "Implement the core behavior for ${short_label}." 1 deps criteria; then
-    core_id="$RALPH_PRD_LAST_ID"
+  response="$(cat "$temp_file")"
+  rm -f "$temp_file"
+
+  if [[ -z "$response" ]]; then
+    ralph_prd_generator_log_error "Agent returned empty response"
+    return 1
   fi
 
-  local -a deliverables
-  deliverables=()
-  if [[ -n "$core_id" ]]; then
-    deliverables+=("$core_id")
-  fi
-
-  if (( needs_api == 1 )); then
-    deps=("$core_id")
-    criteria=(
-      "Expose API endpoints for ${short_label}"
-      "Return clear success/error responses"
-      "Add validation for API inputs"
-    )
-    if ralph_prd_generator_add_story "API for ${short_label}" "Deliver API support for ${short_label}." 2 deps criteria; then
-      api_id="$RALPH_PRD_LAST_ID"
-      deliverables+=("$api_id")
-    else
-      ralph_prd_generator_log "Skipping API story (max stories reached)."
-    fi
-  fi
-
-  if (( needs_ui == 1 )); then
-    deps=("$core_id")
-    criteria=(
-      "Build UI for ${short_label}"
-      "Show loading, success, and error states"
-      "Match the expected UX flow"
-    )
-    if ralph_prd_generator_add_story "UI for ${short_label}" "Add UI for ${short_label}." 2 deps criteria; then
-      ui_id="$RALPH_PRD_LAST_ID"
-      deliverables+=("$ui_id")
-    else
-      ralph_prd_generator_log "Skipping UI story (max stories reached)."
-    fi
-  fi
-
-  if (( needs_cli == 1 )); then
-    deps=("$core_id")
-    criteria=(
-      "Provide CLI commands for ${short_label}"
-      "Display clear output and errors"
-      "Document usage for each command"
-    )
-    if ralph_prd_generator_add_story "CLI for ${short_label}" "Add CLI support for ${short_label}." 2 deps criteria; then
-      cli_id="$RALPH_PRD_LAST_ID"
-      deliverables+=("$cli_id")
-    else
-      ralph_prd_generator_log "Skipping CLI story (max stories reached)."
-    fi
-  fi
-
-  deps=("${deliverables[@]}")
-  criteria=(
-    "Add tests or checks that cover the core ${short_label} flows"
-    "Verify edge cases behave correctly"
-    "Ensure the feature passes automated validation"
-  )
-  if ! ralph_prd_generator_add_story "Tests for ${short_label}" "Validate ${short_label} with automated checks." 3 deps criteria; then
-    ralph_prd_generator_log "Skipping tests story (max stories reached)."
-  fi
-
-  deps=("${deliverables[@]}")
-  criteria=(
-    "Document usage for ${short_label}"
-    "List configuration or setup steps"
-    "Note any limitations or follow-ups"
-  )
-  if ! ralph_prd_generator_add_story "Docs for ${short_label}" "Document ${short_label} for future users." 4 deps criteria; then
-    ralph_prd_generator_log "Skipping docs story (max stories reached)."
-  fi
-
-  local stories_block=""
-  local idx=0
-  local story
-  for story in "${RALPH_PRD_STORIES[@]}"; do
-    if (( idx > 0 )); then
-      stories_block+=$',\n'
-    fi
-    stories_block+="$story"
-    idx=$((idx + 1))
-  done
-
-  mkdir -p "$(dirname "$output")"
-  cat <<EOF > "$output"
-{
-  "title": "PRD: $(ralph_prd_generator_json_escape "$short_label")",
-  "version": "1.0.0",
-  "status": "proposed",
-  "created": "${date}",
-  "updated": "${date}",
-  "author": "ralph prd-generator",
-  "overview": {
-    "summary": "$(ralph_prd_generator_json_escape "$clean_desc")"
-  },
-  "userStories": [
-${stories_block}
-  ]
-}
-EOF
+  echo "$response"
 }
 
 ralph_prd_generator_main() {
@@ -384,9 +389,22 @@ ralph_prd_generator_main() {
   shift
   local description="$*"
 
+  # Print banner
+  if declare -F ralph_print_banner >/dev/null 2>&1 && [[ "${RALPH_NO_BANNER:-}" != "1" ]]; then
+    ralph_print_banner
+  fi
+
+  ralph_prd_generator_log "Starting AI-powered PRD generation"
+
+  # Get description from stdin if not provided
   if [[ -z "$description" ]]; then
     if [[ -t 0 ]]; then
-      ralph_prd_generator_log "Usage: ralph.sh generate-prd 'Feature description'"
+      ralph_prd_generator_log_error "Usage: ralph.sh generate-prd 'Feature description'"
+      echo ""
+      echo "Examples:"
+      echo "  ./ralph.sh generate-prd 'Add user authentication with OAuth'"
+      echo "  ./ralph.sh generate-prd 'Implement video recording during room scans'"
+      echo "  echo 'Add dark mode support' | ./ralph.sh generate-prd"
       return 1
     fi
     description="$(cat)"
@@ -394,18 +412,88 @@ ralph_prd_generator_main() {
 
   description="$(ralph_prd_generator_trim "$description")"
   if [[ -z "$description" ]]; then
-    ralph_prd_generator_log "Feature description is required."
+    ralph_prd_generator_log_error "Feature description is required"
     return 1
   fi
 
-  if ralph_prd_generator_should_use_agent; then
-    ralph_prd_generator_log "Generating PRD via agent (RALPH_PRD_GENERATOR_AGENT=1)."
-    if ralph_prd_generator_generate_with_agent "$description" "$output"; then
-      ralph_prd_generator_log "PRD generated at $output"
-      return 0
-    fi
+  ralph_prd_generator_log "Feature: $description"
+
+  # Get repo root
+  local root
+  root="$(ralph_prd_generator_repo_root)"
+
+  # Analyze repository
+  local analysis
+  analysis="$(ralph_prd_generator_analyze_repo "$root")"
+
+  # Check for existing PRD
+  local existing_prd=""
+  local mode="create"
+  if [[ -f "$output" ]]; then
+    ralph_prd_generator_log_step "Found existing PRD at $output"
+    existing_prd="$(cat "$output")"
+    mode="update"
   fi
 
-  ralph_prd_generator_generate_template "$description" "$output"
-  ralph_prd_generator_log "PRD generated at $output"
+  # Build the prompt
+  ralph_prd_generator_log_step "Building AI prompt..."
+  local prompt
+  prompt="$(ralph_prd_generator_build_prompt "$description" "$analysis" "$existing_prd" "$mode")"
+
+  # Run the agent
+  local response
+  if ! response="$(ralph_prd_generator_run_agent "$prompt")"; then
+    ralph_prd_generator_log_error "Agent failed to generate PRD"
+    return 1
+  fi
+
+  # Extract and validate JSON
+  ralph_prd_generator_log_step "Extracting and validating JSON..."
+  local json
+  json="$(ralph_prd_generator_extract_json "$response")"
+
+  if [[ -z "$json" ]]; then
+    ralph_prd_generator_log_error "Failed to extract valid JSON from agent response"
+    echo "Raw response saved to /tmp/ralph-prd-response.txt"
+    echo "$response" > /tmp/ralph-prd-response.txt
+    return 1
+  fi
+
+  # Validate JSON structure
+  if command -v jq >/dev/null 2>&1; then
+    if ! echo "$json" | jq -e '.userStories | length > 0' >/dev/null 2>&1; then
+      ralph_prd_generator_log_error "Generated PRD has no user stories"
+      echo "$json" > /tmp/ralph-prd-invalid.json
+      return 1
+    fi
+
+    # Pretty print and save
+    mkdir -p "$(dirname "$output")"
+    echo "$json" | jq . > "$output"
+
+    # Report results
+    local story_count
+    story_count="$(echo "$json" | jq '.userStories | length')"
+    local title
+    title="$(echo "$json" | jq -r '.title')"
+
+    ralph_prd_generator_log_success "PRD generated successfully!"
+    echo ""
+    echo "  Title: $title"
+    echo "  Stories: $story_count"
+    echo "  Output: $output"
+    echo ""
+
+    # Show story summary
+    ralph_prd_generator_log "User Stories:"
+    echo "$json" | jq -r '.userStories[] | "  \(.id): \(.title) [\(.effort)] - \(.acceptanceCriteria | length) criteria"'
+
+  else
+    # No jq, just save raw
+    mkdir -p "$(dirname "$output")"
+    echo "$json" > "$output"
+    ralph_prd_generator_log_success "PRD generated at $output (install jq for validation)"
+  fi
+
+  return 0
 }
