@@ -91,9 +91,9 @@ BANNER
 BANNER
   echo -e "${C_BWHITE}"
   cat << 'BANNER'
-    ╔═══════════════════════════════════════════════════════════════════════╗
-    ║        🤖 Autonomous Agent Loop for Code Generation 🤖               ║
-    ╚═══════════════════════════════════════════════════════════════════════╝
+  ╔═════════════════════════════════════════════════════════════════════════╗
+  ║          🤖 Autonomous Agent Loop for Code Generation 🤖               ║
+  ╚═════════════════════════════════════════════════════════════════════════╝
 BANNER
   echo -e "${C_RESET}"
 }
@@ -158,32 +158,32 @@ ralph_colorize_output() {
     next
   }
 
-  # Thinking tags
-  /^thinking$/ || /^<thinking>/ || /^<\/thinking>/ {
-    print magenta "💭 " $0 reset
+  # Thinking tags - highlight the thinking indicator
+  /^thinking$/ {
+    print magenta "💭 thinking" reset
     next
   }
 
-  # Exec commands
+  # Exec commands header
   /^exec$/ {
-    print bblue "⚡ " $0 reset
+    print bblue "⚡ exec" reset
     next
   }
 
-  # Command execution lines
-  /^\/bin\// || /^\/usr\// {
-    print blue "  → " $0 reset
+  # Command execution lines (with arrow)
+  /^  → / {
+    print blue $0 reset
     next
   }
 
-  # Success messages
-  /succeeded/ {
+  # Success messages - must start with succeeded or have "succeeded" as status
+  /succeeded in [0-9]+ms/ || /: succeeded$/ {
     print bgreen "✓ " $0 reset
     next
   }
 
-  # Failed messages
-  /failed/ || /error/i || /Error/ {
+  # Error/failed messages - be specific about error patterns
+  /^Error:/ || /^error:/ || /: error$/ || /failed$/ || /exited [1-9]/ || /: No such file/ {
     print bred "✗ " $0 reset
     next
   }
@@ -207,7 +207,7 @@ ralph_colorize_output() {
     next
   }
 
-  # Bold text **text**
+  # Bold text **text** - inline replacement
   /\*\*[^*]+\*\*/ {
     gsub(/\*\*([^*]+)\*\*/, bwhite "&" reset)
     gsub(/\*\*/, "")
@@ -215,33 +215,7 @@ ralph_colorize_output() {
     next
   }
 
-  # Italic text *text* (single asterisk)
-  /\*[^*]+\*/ {
-    # Only process if not part of ** pattern
-    if (!match($0, /\*\*/)) {
-      gsub(/\*([^*]+)\*/, dim "&" reset)
-      gsub(/\*/, "")
-    }
-    print $0
-    next
-  }
-
-  # File paths
-  /^\// || /\.swift/ || /\.ts/ || /\.js/ || /\.py/ || /\.go/ || /\.rs/ {
-    print cyan $0 reset
-    next
-  }
-
-  # Line numbers with content (grep-style output)
-  /^[0-9]+:/ {
-    match($0, /^[0-9]+:/)
-    line_num = substr($0, 1, RLENGTH)
-    rest = substr($0, RLENGTH + 1)
-    print dim line_num reset rest
-    next
-  }
-
-  # Default
+  # Default - pass through unchanged
   { print $0 }
   '
 }
@@ -912,12 +886,12 @@ ralph_iteration_banner() {
   progress_bar="${C_BGREEN}$(printf '█%.0s' $(seq 1 $filled 2>/dev/null) || true)${C_DIM}$(printf '░%.0s' $(seq 1 $empty 2>/dev/null) || true)${C_RESET}"
 
   echo ""
-  echo -e "${C_BBLUE}╔══════════════════════════════════════════════════════════════════════════╗${C_RESET}"
-  echo -e "${C_BBLUE}║${C_RESET}  ${C_BWHITE}ITERATION${C_RESET} ${C_BCYAN}${iteration}${C_DIM}/${max_iterations}${C_RESET}  ${progress_bar}  ${status_color}${status_icon} ${status}${C_RESET}"
+  echo -e "${C_BBLUE}╭──────────────────────────────────────────────────────────────────────────╮${C_RESET}"
+  printf "${C_BBLUE}│${C_RESET}  ${C_BWHITE}ITERATION${C_RESET} ${C_BCYAN}%-4s${C_DIM}/ %-4s${C_RESET} ${progress_bar}          ${status_color}${status_icon} %-10s${C_RESET}${C_BBLUE}│${C_RESET}\n" "$iteration" "$max_iterations" "$status"
   if [[ -n "$ts" ]]; then
-    echo -e "${C_BBLUE}║${C_RESET}  ${C_DIM}${ts}${C_RESET}"
+    printf "${C_BBLUE}│${C_RESET}  ${C_DIM}%-72s${C_RESET}${C_BBLUE}│${C_RESET}\n" "$ts"
   fi
-  echo -e "${C_BBLUE}╚══════════════════════════════════════════════════════════════════════════╝${C_RESET}"
+  echo -e "${C_BBLUE}╰──────────────────────────────────────────────────────────────────────────╯${C_RESET}"
 }
 
 ralph_run_summary() {
@@ -956,61 +930,61 @@ ralph_run_summary() {
   esac
 
   echo ""
-  echo -e "${C_BMAGENTA}╔══════════════════════════════════════════════════════════════════════════╗${C_RESET}"
-  echo -e "${C_BMAGENTA}║${C_RESET}  ${C_BWHITE}📊 RALPH SUMMARY${C_RESET}"
-  echo -e "${C_BMAGENTA}╠══════════════════════════════════════════════════════════════════════════╣${C_RESET}"
-  echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Status:${C_RESET}            ${status_color}${status_icon} ${status}${C_RESET}"
-  echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Iterations:${C_RESET}        ${C_BCYAN}${ITERATIONS_RUN:-0}${C_DIM}/${MAX_ITERATIONS:-unknown}${C_RESET}"
+  echo -e "${C_BMAGENTA}╭──────────────────────────────────────────────────────────────────────────╮${C_RESET}"
+  echo -e "${C_BMAGENTA}│${C_RESET}  ${C_BWHITE}📊 RALPH SUMMARY${C_RESET}                                                       ${C_BMAGENTA}│${C_RESET}"
+  echo -e "${C_BMAGENTA}├──────────────────────────────────────────────────────────────────────────┤${C_RESET}"
+  printf "${C_BMAGENTA}│${C_RESET}  ${C_DIM}Status:${C_RESET}            ${status_color}${status_icon} %-50s${C_RESET}${C_BMAGENTA}│${C_RESET}\n" "$status"
+  printf "${C_BMAGENTA}│${C_RESET}  ${C_DIM}Iterations:${C_RESET}        ${C_BCYAN}%-3s${C_DIM}/ %-48s${C_RESET}${C_BMAGENTA}│${C_RESET}\n" "${ITERATIONS_RUN:-0}" "${MAX_ITERATIONS:-unknown}"
 
   if [[ -n "$completed" ]]; then
     if [[ -n "$total" ]]; then
-      echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Completed stories:${C_RESET} ${C_BGREEN}${completed}${C_DIM}/${total}${C_RESET}"
+      printf "${C_BMAGENTA}│${C_RESET}  ${C_DIM}Completed stories:${C_RESET} ${C_BGREEN}%-3s${C_DIM}/ %-48s${C_RESET}${C_BMAGENTA}│${C_RESET}\n" "$completed" "$total"
     else
-      echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Completed stories:${C_RESET} ${C_BGREEN}${completed}${C_RESET}"
+      printf "${C_BMAGENTA}│${C_RESET}  ${C_DIM}Completed stories:${C_RESET} ${C_BGREEN}%-52s${C_RESET}${C_BMAGENTA}│${C_RESET}\n" "$completed"
     fi
 
     if ralph_is_int "${INITIAL_COMPLETED:-}" && ralph_is_int "$completed"; then
       local delta=$((completed - INITIAL_COMPLETED))
       if (( delta >= 0 )); then
-        echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Completed this run:${C_RESET} ${C_BGREEN}+${delta}${C_RESET}"
+        printf "${C_BMAGENTA}│${C_RESET}  ${C_DIM}Completed this run:${C_RESET} ${C_BGREEN}+%-51s${C_RESET}${C_BMAGENTA}│${C_RESET}\n" "$delta"
       fi
     fi
   else
-    echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Completed stories:${C_RESET} ${C_DIM}unavailable (jq not found)${C_RESET}"
+    echo -e "${C_BMAGENTA}│${C_RESET}  ${C_DIM}Completed stories:${C_RESET} ${C_DIM}unavailable (jq not found)${C_RESET}                        ${C_BMAGENTA}│${C_RESET}"
   fi
 
   if [[ -n "$duration" ]]; then
-    echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Elapsed time:${C_RESET}      ${C_BCYAN}${duration}${C_RESET}"
+    printf "${C_BMAGENTA}│${C_RESET}  ${C_DIM}Elapsed time:${C_RESET}      ${C_BCYAN}%-52s${C_RESET}${C_BMAGENTA}│${C_RESET}\n" "$duration"
   fi
 
-  local cost_line="${C_DIM}unavailable${C_RESET}"
+  local cost_line="unavailable"
   if [[ -n "${RALPH_COST_TOTAL_CENTS:-}" && -n "${RALPH_COST_ENTRIES:-}" ]]; then
     if declare -F ralph_cost_control_format_cents >/dev/null 2>&1; then
       local cost_fmt
       cost_fmt="$(ralph_cost_control_format_cents "$RALPH_COST_TOTAL_CENTS" || true)"
       if [[ -n "$cost_fmt" ]]; then
-        cost_line="${C_BYELLOW}${cost_fmt}${C_RESET}"
+        cost_line="${cost_fmt}"
         if ralph_is_int "${RALPH_COST_ENTRIES:-}" && ralph_is_int "${RALPH_COST_ITERATION_COUNT:-}"; then
-          cost_line="${cost_line} ${C_DIM}(tracked: ${RALPH_COST_ENTRIES}/${RALPH_COST_ITERATION_COUNT})${C_RESET}"
+          cost_line="${cost_line} (tracked: ${RALPH_COST_ENTRIES}/${RALPH_COST_ITERATION_COUNT})"
         fi
       fi
     fi
   fi
-  echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Cost estimate:${C_RESET}     ${cost_line}"
+  printf "${C_BMAGENTA}│${C_RESET}  ${C_DIM}Cost estimate:${C_RESET}     ${C_BYELLOW}%-52s${C_RESET}${C_BMAGENTA}│${C_RESET}\n" "$cost_line"
 
   if [[ "${RALPH_STOP_REASON:-}" == "stuck_story" ]]; then
-    echo -e "${C_BMAGENTA}╠══════════════════════════════════════════════════════════════════════════╣${C_RESET}"
-    echo -e "${C_BMAGENTA}║${C_RESET}  ${C_BRED}⚠ FAILURE ANALYSIS${C_RESET}"
-    echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Story${C_RESET} ${C_BYELLOW}${RALPH_CB_STUCK_STORY_ID:-unknown}${C_RESET} ${C_DIM}failed${C_RESET} ${C_BRED}${RALPH_CB_STUCK_FAILURES:-?}${C_RESET} ${C_DIM}times${C_RESET}"
-    echo -e "${C_BMAGENTA}║${C_RESET}  ${C_DIM}Consider splitting the story or reviewing dependencies.${C_RESET}"
+    echo -e "${C_BMAGENTA}├──────────────────────────────────────────────────────────────────────────┤${C_RESET}"
+    echo -e "${C_BMAGENTA}│${C_RESET}  ${C_BRED}⚠ FAILURE ANALYSIS${C_RESET}                                                    ${C_BMAGENTA}│${C_RESET}"
+    printf "${C_BMAGENTA}│${C_RESET}  ${C_DIM}Story${C_RESET} ${C_BYELLOW}%-10s${C_RESET} ${C_DIM}failed${C_RESET} ${C_BRED}%-3s${C_RESET} ${C_DIM}%-37s${C_RESET}${C_BMAGENTA}│${C_RESET}\n" "${RALPH_CB_STUCK_STORY_ID:-unknown}" "${RALPH_CB_STUCK_FAILURES:-?}" "times"
+    echo -e "${C_BMAGENTA}│${C_RESET}  ${C_DIM}Consider splitting the story or reviewing dependencies.${C_RESET}               ${C_BMAGENTA}│${C_RESET}"
   fi
 
   if [[ "$exit_code" -ne 0 && -n "${LAST_FAILURE_REASON:-}" ]]; then
-    echo -e "${C_BMAGENTA}╠══════════════════════════════════════════════════════════════════════════╣${C_RESET}"
-    echo -e "${C_BMAGENTA}║${C_RESET}  ${C_BRED}Last failure:${C_RESET} ${LAST_FAILURE_REASON}"
+    echo -e "${C_BMAGENTA}├──────────────────────────────────────────────────────────────────────────┤${C_RESET}"
+    printf "${C_BMAGENTA}│${C_RESET}  ${C_BRED}Last failure:${C_RESET} %-57s${C_BMAGENTA}│${C_RESET}\n" "${LAST_FAILURE_REASON:0:57}"
   fi
 
-  echo -e "${C_BMAGENTA}╚══════════════════════════════════════════════════════════════════════════╝${C_RESET}"
+  echo -e "${C_BMAGENTA}╰──────────────────────────────────────────────────────────────────────────╯${C_RESET}"
   echo ""
 }
 
@@ -1664,16 +1638,17 @@ if declare -F ralph_monitor_init >/dev/null 2>&1; then
   ralph_monitor_init
 fi
 
-echo -e "${C_BGREEN}╔══════════════════════════════════════════════════════════════════════════╗${C_RESET}"
-echo -e "${C_BGREEN}║${C_RESET}  ${C_BWHITE}🚀 STARTING RALPH${C_RESET}"
-echo -e "${C_BGREEN}╠══════════════════════════════════════════════════════════════════════════╣${C_RESET}"
-echo -e "${C_BGREEN}║${C_RESET}  ${C_DIM}Max iterations:${C_RESET}  ${C_BCYAN}$MAX_ITERATIONS${C_RESET}"
-echo -e "${C_BGREEN}║${C_RESET}  ${C_DIM}Mode:${C_RESET}            ${C_BCYAN}${RALPH_MODE:-stories}${C_RESET}"
-echo -e "${C_BGREEN}║${C_RESET}  ${C_DIM}Agent:${C_RESET}           ${C_BCYAN}${RALPH_AGENT_PRESET:-codex}${C_RESET}"
+echo ""
+echo -e "${C_BGREEN}╭──────────────────────────────────────────────────────────────────────────╮${C_RESET}"
+printf "${C_BGREEN}│${C_RESET}  ${C_BWHITE}🚀 STARTING RALPH${C_RESET}%-53s${C_BGREEN}│${C_RESET}\n" ""
+echo -e "${C_BGREEN}├──────────────────────────────────────────────────────────────────────────┤${C_RESET}"
+printf "${C_BGREEN}│${C_RESET}  ${C_DIM}Max iterations:${C_RESET}  ${C_BCYAN}%-53s${C_RESET}${C_BGREEN}│${C_RESET}\n" "$MAX_ITERATIONS"
+printf "${C_BGREEN}│${C_RESET}  ${C_DIM}Mode:${C_RESET}            ${C_BCYAN}%-53s${C_RESET}${C_BGREEN}│${C_RESET}\n" "${RALPH_MODE:-stories}"
+printf "${C_BGREEN}│${C_RESET}  ${C_DIM}Agent:${C_RESET}           ${C_BCYAN}%-53s${C_RESET}${C_BGREEN}│${C_RESET}\n" "${RALPH_AGENT_PRESET:-codex}"
 if [[ -n "$TOTAL_STORIES" ]]; then
-  echo -e "${C_BGREEN}║${C_RESET}  ${C_DIM}Stories:${C_RESET}         ${C_BCYAN}${INITIAL_COMPLETED:-0}${C_DIM}/${TOTAL_STORIES} completed${C_RESET}"
+  printf "${C_BGREEN}│${C_RESET}  ${C_DIM}Stories:${C_RESET}         ${C_BCYAN}%-3s${C_DIM}/ %-3s completed${C_RESET}%-37s${C_BGREEN}│${C_RESET}\n" "${INITIAL_COMPLETED:-0}" "$TOTAL_STORIES" ""
 fi
-echo -e "${C_BGREEN}╚══════════════════════════════════════════════════════════════════════════╝${C_RESET}"
+echo -e "${C_BGREEN}╰──────────────────────────────────────────────────────────────────────────╯${C_RESET}"
 echo ""
 
 ralph_log_verbose "Prompt file: $PROMPT_FILE"
