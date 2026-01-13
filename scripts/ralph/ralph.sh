@@ -24,6 +24,7 @@ if ralph_colors_enabled; then
   C_ITALIC='\033[3m'
   C_UNDERLINE='\033[4m'
   # Colors
+  C_BLACK='\033[0;30m'
   C_RED='\033[0;31m'
   C_GREEN='\033[0;32m'
   C_YELLOW='\033[0;33m'
@@ -32,6 +33,7 @@ if ralph_colors_enabled; then
   C_CYAN='\033[0;36m'
   C_WHITE='\033[0;37m'
   # Bright colors
+  C_BBLACK='\033[1;30m'
   C_BRED='\033[1;31m'
   C_BGREEN='\033[1;32m'
   C_BYELLOW='\033[1;33m'
@@ -44,11 +46,12 @@ if ralph_colors_enabled; then
   C_BG_GREEN='\033[42m'
   C_BG_YELLOW='\033[43m'
   C_BG_BLUE='\033[44m'
+  C_BG_CYAN='\033[46m'
 else
   C_RESET='' C_BOLD='' C_DIM='' C_ITALIC='' C_UNDERLINE=''
-  C_RED='' C_GREEN='' C_YELLOW='' C_BLUE='' C_MAGENTA='' C_CYAN='' C_WHITE=''
-  C_BRED='' C_BGREEN='' C_BYELLOW='' C_BBLUE='' C_BMAGENTA='' C_BCYAN='' C_BWHITE=''
-  C_BG_RED='' C_BG_GREEN='' C_BG_YELLOW='' C_BG_BLUE=''
+  C_BLACK='' C_RED='' C_GREEN='' C_YELLOW='' C_BLUE='' C_MAGENTA='' C_CYAN='' C_WHITE=''
+  C_BBLACK='' C_BRED='' C_BGREEN='' C_BYELLOW='' C_BBLUE='' C_BMAGENTA='' C_BCYAN='' C_BWHITE=''
+  C_BG_RED='' C_BG_GREEN='' C_BG_YELLOW='' C_BG_BLUE='' C_BG_CYAN=''
 fi
 
 ralph_print_banner() {
@@ -170,18 +173,112 @@ ralph_colorize_output() {
       -v bmagenta="$C_BMAGENTA" \
       -v white="$C_WHITE" \
       -v bwhite="$C_BWHITE" \
+      -v black="$C_BLACK" \
+      -v bblack="$C_BBLACK" \
+      -v bgred="$C_BG_RED" \
+      -v bggreen="$C_BG_GREEN" \
+      -v bgyellow="$C_BG_YELLOW" \
+      -v bgblue="$C_BG_BLUE" \
+      -v bgcyan="$C_BG_CYAN" \
       -v bold="$C_BOLD" \
   '
   BEGIN {
     in_code_block = 0
+    code_lang = ""
+    diff_mode = 0
+    suppress_output = 0
+    in_thinking = 0
+  }
+
+  function trim(s) {
+    sub(/^[[:space:]]+/, "", s)
+    sub(/[[:space:]]+$/, "", s)
+    return s
+  }
+
+  function lower(s) {
+    return tolower(s)
+  }
+
+  function is_shell_lang(lang) {
+    return (lang ~ /^(bash|sh|zsh|shell|console|terminal)$/)
+  }
+
+  function is_diff_lang(lang) {
+    return (lang ~ /^(diff|patch)$/)
+  }
+
+  function is_file_read_cmd(cmd) {
+    return (cmd ~ /(^|[[:space:]])(cat|sed|tail|head|less|more)[[:space:]]/)
+  }
+
+  function extract_files(cmd,    cleaned, n, i, tok, files) {
+    cleaned = cmd
+    sub(/[|;&].*$/, "", cleaned)
+    n = split(cleaned, parts, /[[:space:]]+/)
+    files = ""
+    for (i = 2; i <= n; i++) {
+      tok = parts[i]
+      if (tok ~ /^-/ || tok == "") {
+        continue
+      }
+      gsub(/^['\"]|['\"]$/, "", tok)
+      if (tok ~ /\// || tok ~ /\.[A-Za-z0-9]{1,8}$/ || tok ~ /^[A-Za-z0-9._-]+$/) {
+        if (files != "") {
+          files = files ", "
+        }
+        files = files tok
+      }
+    }
+    return files
+  }
+
+  {
+    if (suppress_output) {
+      if ($0 ~ /^exec$/ || $0 ~ /^  → / || $0 ~ /^thinking$/) {
+        suppress_output = 0
+      } else {
+        next
+      }
+    }
+  }
+
+  # Thinking blocks
+  /^<thinking>$/ {
+    in_thinking = 1
+    print dim "💭 thinking" reset
+    next
+  }
+
+  /^<\/thinking>$/ {
+    in_thinking = 0
+    next
+  }
+
+  /^thinking$/ {
+    in_thinking = 1
+    print dim "💭 thinking" reset
+    next
+  }
+
+  in_thinking {
+    if ($0 ~ /^(final|response|assistant)$/ || $0 ~ /^exec$/ || $0 ~ /^  → /) {
+      in_thinking = 0
+    } else {
+      print dim $0 reset
+      next
+    }
   }
 
   # Code blocks
   /^```/ {
+    diff_mode = 0
     if (in_code_block) {
       print dim $0 reset
       in_code_block = 0
+      code_lang = ""
     } else {
+      code_lang = lower(trim(substr($0, 4)))
       print dim $0 reset
       in_code_block = 1
     }
@@ -189,26 +286,101 @@ ralph_colorize_output() {
   }
 
   in_code_block {
-    print dim $0 reset
-    next
-  }
-
-  # Thinking tags - highlight the thinking indicator
-  /^thinking$/ {
-    print magenta "💭 thinking" reset
+    if (is_diff_lang(code_lang)) {
+      if ($0 ~ /^diff --git / || $0 ~ /^index / || $0 ~ /^--- / || $0 ~ /^\+\+\+ /) {
+        print bgblue bwhite $0 reset
+        next
+      }
+      if ($0 ~ /^@@/) {
+        print bgyellow bblack $0 reset
+        next
+      }
+      if ($0 ~ /^\+/) {
+        print bggreen bblack $0 reset
+        next
+      }
+      if ($0 ~ /^-/) {
+        print bgred bwhite $0 reset
+        next
+      }
+      print bwhite $0 reset
+      next
+    }
+    if (is_shell_lang(code_lang)) {
+      print bgcyan bblack $0 reset
+      next
+    }
+    print bggreen bblack $0 reset
     next
   }
 
   # Exec commands header
   /^exec$/ {
-    print bblue "⚡ exec" reset
+    print bgblue bwhite "⚡ exec" reset
     next
   }
 
   # Command execution lines (with arrow)
   /^  → / {
-    print blue $0 reset
+    cmd = $0
+    sub(/^  → /, "", cmd)
+    print bgcyan bblack "  → " cmd reset
+    if (is_file_read_cmd(cmd)) {
+      files = extract_files(cmd)
+      if (files == "") {
+        files = "(file content hidden)"
+      }
+      print bgyellow bblack "📖 read: " files " (content hidden)" reset
+      suppress_output = 1
+    }
     next
+  }
+
+  # Diff output outside code blocks
+  /^diff --git / {
+    diff_mode = 1
+    print bgblue bwhite $0 reset
+    next
+  }
+  /^index / {
+    diff_mode = 1
+    print bgblue bwhite $0 reset
+    next
+  }
+  /^@@/ {
+    diff_mode = 1
+    print bgyellow bblack $0 reset
+    next
+  }
+  /^--- / {
+    diff_mode = 1
+    print bgblue bwhite $0 reset
+    next
+  }
+  /^\+\+\+ / {
+    diff_mode = 1
+    print bgblue bwhite $0 reset
+    next
+  }
+  diff_mode && /^\+/ {
+    print bggreen bblack $0 reset
+    next
+  }
+  diff_mode && /^-/ {
+    print bgred bwhite $0 reset
+    next
+  }
+  diff_mode && /^ / {
+    print dim $0 reset
+    next
+  }
+  diff_mode && $0 ~ /^$/ {
+    diff_mode = 0
+    print $0
+    next
+  }
+  diff_mode {
+    diff_mode = 0
   }
 
   # Success messages - must start with succeeded or have "succeeded" as status
