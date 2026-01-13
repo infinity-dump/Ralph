@@ -98,15 +98,11 @@ ralph_cost_control_format_cents() {
 
 ralph_cost_control_extract_cost_from_output() {
   local output="$1"
-  awk '
-    {
-      line = tolower($0)
-      if (match(line, /(cost|spent|spend|usage)[^0-9$]*\$?([0-9]+(\.[0-9]+)?)/, m)) {
-        print m[2]
-        exit
-      }
-    }
-  ' <<<"$output"
+  # Use grep + sed for POSIX compatibility (BSD awk lacks capture groups)
+  echo "$output" | tr '[:upper:]' '[:lower:]' | \
+    grep -oE '(cost|spent|spend|usage)[^0-9$]*\$?[0-9]+(\.[0-9]+)?' | \
+    head -n 1 | \
+    grep -oE '[0-9]+(\.[0-9]+)?$' || true
 }
 
 ralph_cost_control_record_cost() {
