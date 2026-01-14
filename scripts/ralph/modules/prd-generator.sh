@@ -142,10 +142,105 @@ ralph_prd_generator_build_retry_prompt() {
   cat <<EOF
 IMPORTANT: Your previous response was invalid because it did not include a non-empty "userStories" array.
 Return ONLY valid JSON matching the required schema. Do NOT include markdown or commentary.
-You MUST include 5-15 user stories.
+You MUST include 5-15 user stories that satisfy the user request.
 
 $original_prompt
 EOF
+}
+
+ralph_prd_generator_build_repair_prompt() {
+  local previous_response="$1"
+  local original_prompt="$2"
+  cat <<EOF
+Your previous response was invalid. Fix it by returning ONLY valid JSON that matches the schema.
+Do NOT include markdown, commentary, or extra keys.
+You MUST include 5-15 user stories.
+
+Previous response:
+<<<
+$previous_response
+>>>
+
+Original requirements:
+$original_prompt
+EOF
+}
+
+ralph_prd_generator_init_agent() {
+  local preset="${RALPH_PRD_AGENT:-${RALPH_AGENT:-}}"
+  local cmd_str=""
+
+  if [[ -n "${RALPH_PRD_AGENT_CMD:-}" ]]; then
+    cmd_str="${RALPH_PRD_AGENT_CMD}"
+  elif [[ -n "${RALPH_AGENT_CMD:-}" ]]; then
+    cmd_str="${RALPH_AGENT_CMD}"
+  fi
+
+  PRD_AGENT_CMD=()
+  PRD_AGENT_INPUT_MODE="stdin"
+  PRD_AGENT_INPUT_ARG="-"
+
+  if [[ -n "$cmd_str" ]]; then
+    # shellcheck disable=SC2206
+    PRD_AGENT_CMD=(${cmd_str})
+    local base
+    base="$(basename "${PRD_AGENT_CMD[0]}")"
+    case "$base" in
+      aider)
+        PRD_AGENT_INPUT_MODE="file"
+        PRD_AGENT_INPUT_ARG=""
+        ;;
+      claude)
+        PRD_AGENT_INPUT_MODE="stdin"
+        PRD_AGENT_INPUT_ARG=""
+        ;;
+      codex)
+        PRD_AGENT_INPUT_MODE="stdin"
+        PRD_AGENT_INPUT_ARG="-"
+        ;;
+    esac
+  else
+    if [[ -z "$preset" ]]; then
+      preset="codex"
+    fi
+
+    case "$preset" in
+      codex)
+        PRD_AGENT_CMD=(codex exec --dangerously-bypass-approvals-and-sandbox)
+        PRD_AGENT_INPUT_MODE="stdin"
+        PRD_AGENT_INPUT_ARG="-"
+        ;;
+      claude)
+        PRD_AGENT_CMD=(claude --dangerously-skip-permissions)
+        PRD_AGENT_INPUT_MODE="stdin"
+        PRD_AGENT_INPUT_ARG=""
+        ;;
+      aider)
+        PRD_AGENT_CMD=(aider --message-file)
+        PRD_AGENT_INPUT_MODE="file"
+        PRD_AGENT_INPUT_ARG=""
+        ;;
+      custom)
+        ralph_prd_generator_log_error "RALPH_PRD_AGENT=custom requires RALPH_PRD_AGENT_CMD to be set."
+        return 1
+        ;;
+      *)
+        PRD_AGENT_CMD=(codex exec --dangerously-bypass-approvals-and-sandbox)
+        PRD_AGENT_INPUT_MODE="stdin"
+        PRD_AGENT_INPUT_ARG="-"
+        ;;
+    esac
+  fi
+
+  if [[ "${RALPH_SKIP_GIT_CHECK:-}" == "1" ]]; then
+    local base
+    base="$(basename "${PRD_AGENT_CMD[0]}")"
+    if [[ "$base" == "codex" ]]; then
+      PRD_AGENT_CMD+=("--skip-git-repo-check")
+    fi
+  fi
+
+  return 0
 }
 
 ralph_prd_generator_repo_root() {
@@ -457,34 +552,57 @@ ralph_prd_generator_extract_json() {
 
 ralph_prd_generator_run_agent() {
   local prompt="$1"
-  local agent_cmd
-  agent_cmd="$(ralph_prd_generator_resolve_agent_cmd)"
-  local input_mode
-  input_mode="$(ralph_prd_generator_get_agent_input_mode)"
-
-  # shellcheck disable=SC2206
-  local cmd=(${agent_cmd})
-  if [[ "${#cmd[@]}" -eq 0 ]]; then
-    ralph_prd_generator_log_error "Agent command not configured"
-    return 1
+  if [[ "${#PRD_AGENT_CMD[@]:-0}" -eq 0 ]]; then
+    if ! ralph_prd_generator_init_agent; then
+      ralph_prd_generator_log_error "Agent command not configured"
+      return 1
+    fi
   fi
 
-  ralph_prd_generator_log_step "Running AI agent (${cmd[0]})..."
+  if declare -F ralph_log_verbose >/dev/null 2>&1; then
+    ralph_log_verbose "Agent command: ${PRD_AGENT_CMD[*]}"
+    ralph_log_verbose "Agent input mode: ${PRD_AGENT_INPUT_MODE}"
+  fi
+
+  ralph_prd_generator_log_step "Running AI agent (${PRD_AGENT_CMD[0]})..."
 
   local response=""
   local temp_file
+  local prompt_file=""
   temp_file="$(mktemp)"
 
-  if [[ "$input_mode" == "arg" ]]; then
-    # Aider-style: pass prompt as argument
-    "${cmd[@]}" "$prompt" 2>&1 | tee "$temp_file"
+  if [[ "$PRD_AGENT_INPUT_MODE" == "file" ]]; then
+    prompt_file="$(mktemp)"
+    printf "%s" "$prompt" > "$prompt_file"
+    if declare -F ralph_log_verbose >/dev/null 2>&1; then
+      ralph_log_verbose "Prompt file: $prompt_file"
+    fi
+    if [[ "${RALPH_LOG_ACTIVE:-0}" -eq 1 ]]; then
+      "${PRD_AGENT_CMD[@]}" "$prompt_file" 2>&1 | tee "$temp_file" | ralph_colorize_output
+    else
+      "${PRD_AGENT_CMD[@]}" "$prompt_file" 2>&1 | tee "$temp_file" | ralph_colorize_output
+    fi
   else
-    # Codex/Claude style: pass prompt via stdin
-    printf "%s" "$prompt" | "${cmd[@]}" - 2>&1 | tee "$temp_file"
+    if [[ -n "${PRD_AGENT_INPUT_ARG:-}" ]]; then
+      if [[ "${RALPH_LOG_ACTIVE:-0}" -eq 1 ]]; then
+        printf "%s" "$prompt" | "${PRD_AGENT_CMD[@]}" "$PRD_AGENT_INPUT_ARG" 2>&1 | tee "$temp_file" | ralph_colorize_output
+      else
+        printf "%s" "$prompt" | "${PRD_AGENT_CMD[@]}" "$PRD_AGENT_INPUT_ARG" 2>&1 | tee "$temp_file" | ralph_colorize_output
+      fi
+    else
+      if [[ "${RALPH_LOG_ACTIVE:-0}" -eq 1 ]]; then
+        printf "%s" "$prompt" | "${PRD_AGENT_CMD[@]}" 2>&1 | tee "$temp_file" | ralph_colorize_output
+      else
+        printf "%s" "$prompt" | "${PRD_AGENT_CMD[@]}" 2>&1 | tee "$temp_file" | ralph_colorize_output
+      fi
+    fi
   fi
 
   response="$(cat "$temp_file")"
   rm -f "$temp_file"
+  if [[ -n "$prompt_file" ]]; then
+    rm -f "$prompt_file"
+  fi
 
   if [[ -z "$response" ]]; then
     ralph_prd_generator_log_error "Agent returned empty response"
@@ -498,6 +616,13 @@ ralph_prd_generator_main() {
   local output="$1"
   shift
   local description="$*"
+
+  if declare -F ralph_log_init >/dev/null 2>&1; then
+    ralph_log_init
+  fi
+  if declare -F ralph_verbose_enabled >/dev/null 2>&1 && ralph_verbose_enabled; then
+    ralph_log "Verbose mode enabled."
+  fi
 
   # Print banner
   if declare -F ralph_print_banner >/dev/null 2>&1 && [[ "${RALPH_NO_BANNER:-}" != "1" ]]; then
@@ -555,7 +680,7 @@ ralph_prd_generator_main() {
   local json
   local attempts=1
   local max_attempts="${RALPH_PRD_MAX_ATTEMPTS:-2}"
-  local allow_fallback="${RALPH_PRD_FALLBACK:-1}"
+  local allow_fallback="${RALPH_PRD_FALLBACK:-0}"
 
   while true; do
     if ! response="$(ralph_prd_generator_run_agent "$prompt")"; then
@@ -591,8 +716,8 @@ ralph_prd_generator_main() {
       return 1
     fi
 
-    ralph_prd_generator_log_warn "Generated PRD was invalid; retrying with stricter prompt."
-    prompt="$(ralph_prd_generator_build_retry_prompt "$prompt")"
+    ralph_prd_generator_log_warn "Generated PRD was invalid; retrying with a repair prompt."
+    prompt="$(ralph_prd_generator_build_repair_prompt "$response" "$prompt")"
     attempts=$((attempts + 1))
   done
 
