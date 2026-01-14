@@ -249,7 +249,7 @@ ralph_prd_generator_repo_root() {
 
 ralph_prd_generator_resolve_agent_cmd() {
   # Use same agent preset system as main ralph.sh
-  local preset="${RALPH_AGENT:-${RALPH_PRD_AGENT:-codex}}"
+  local preset="${RALPH_AGENT:-${RALPH_PRD_AGENT:-claude}}"
 
   if [[ -n "${RALPH_PRD_AGENT_CMD:-}" ]]; then
     echo "${RALPH_PRD_AGENT_CMD}"
@@ -272,13 +272,13 @@ ralph_prd_generator_resolve_agent_cmd() {
       echo "aider --yes --message"
       ;;
     *)
-      echo "codex exec --dangerously-bypass-approvals-and-sandbox"
+      echo "claude --dangerously-skip-permissions"
       ;;
   esac
 }
 
 ralph_prd_generator_get_agent_input_mode() {
-  local preset="${RALPH_AGENT:-${RALPH_PRD_AGENT:-codex}}"
+  local preset="${RALPH_AGENT:-${RALPH_PRD_AGENT:-claude}}"
   case "$preset" in
     aider)
       echo "arg"

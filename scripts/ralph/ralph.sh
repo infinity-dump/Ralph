@@ -1688,7 +1688,7 @@ if [[ -n "${RALPH_AGENT_CMD:-}" ]]; then
   fi
 else
   if [[ -z "$RALPH_AGENT_PRESET" ]]; then
-    RALPH_AGENT_PRESET="codex"
+    RALPH_AGENT_PRESET="claude"
   fi
 
   if [[ "$RALPH_AGENT_PRESET" == "custom" ]]; then
