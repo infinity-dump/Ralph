@@ -552,7 +552,7 @@ ralph_prd_generator_extract_json() {
 
 ralph_prd_generator_run_agent() {
   local prompt="$1"
-  if [[ "${#PRD_AGENT_CMD[@]}" -eq 0 ]]; then
+  if [[ -z "${PRD_AGENT_CMD+x}" ]] || [[ "${#PRD_AGENT_CMD[@]}" -eq 0 ]]; then
     if ! ralph_prd_generator_init_agent; then
       ralph_prd_generator_log_error "Agent command not configured"
       return 1
