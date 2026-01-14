@@ -32,10 +32,120 @@ ralph_prd_generator_log_error() {
   fi
 }
 
+ralph_prd_generator_log_warn() {
+  if declare -F ralph_log_warn >/dev/null 2>&1; then
+    ralph_log_warn "[prd-gen] $*"
+  else
+    echo "⚠ $*"
+  fi
+}
+
 ralph_prd_generator_trim() {
   local text="$1"
   text="$(echo "$text" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
   echo "$text"
+}
+
+ralph_prd_generator_escape_json_string() {
+  local text="$1"
+  text="${text//$'\n'/ }"
+  text="${text//$'\r'/ }"
+  text="${text//\"/\'}"
+  text="$(echo "$text" | sed -e 's/[[:space:]]\{1,\}/ /g' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  echo "$text"
+}
+
+ralph_prd_generator_fallback_template() {
+  local description="$1"
+  local safe_desc
+  safe_desc="$(ralph_prd_generator_escape_json_string "$description")"
+  local today
+  today="$(date +%F 2>/dev/null || echo "YYYY-MM-DD")"
+
+  cat <<EOF
+{
+  "title": "PRD: ${safe_desc}",
+  "version": "1.0.0",
+  "status": "active",
+  "created": "${today}",
+  "updated": "${today}",
+  "author": "ralph-ai",
+  "overview": {
+    "summary": "Fallback PRD generated for: ${safe_desc}"
+  },
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Define requirements and integration points",
+      "description": "Clarify scope, APIs, and data flow for the requested feature set.",
+      "priority": 1,
+      "acceptanceCriteria": [
+        "Document required APIs and credentials",
+        "Identify data inputs/outputs",
+        "List constraints and edge cases"
+      ],
+      "passes": false,
+      "effort": "small",
+      "files": [],
+      "dependencies": [],
+      "status": "pending"
+    },
+    {
+      "id": "US-002",
+      "title": "Implement core feature workflow",
+      "description": "Build the primary user-facing workflow for the requested feature.",
+      "priority": 2,
+      "acceptanceCriteria": [
+        "Core flow implemented end-to-end",
+        "Handles expected error states",
+        "Logs or reports key failures"
+      ],
+      "passes": false,
+      "effort": "medium",
+      "files": [],
+      "dependencies": ["US-001"],
+      "status": "pending"
+    },
+    {
+      "id": "US-003",
+      "title": "Validation and QA checks",
+      "description": "Add validation, tests, or sanity checks for the workflow.",
+      "priority": 3,
+      "acceptanceCriteria": [
+        "Validation added for critical inputs",
+        "Basic tests or checks added",
+        "Documented how to verify the feature"
+      ],
+      "passes": false,
+      "effort": "small",
+      "files": [],
+      "dependencies": ["US-002"],
+      "status": "pending"
+    }
+  ]
+}
+EOF
+}
+
+ralph_prd_generator_validate_json() {
+  local json="$1"
+  if command -v jq >/dev/null 2>&1; then
+    echo "$json" | jq -e '.userStories | length > 0' >/dev/null 2>&1
+    return $?
+  fi
+
+  echo "$json" | grep -q '"userStories"' && echo "$json" | grep -q '"id"'
+}
+
+ralph_prd_generator_build_retry_prompt() {
+  local original_prompt="$1"
+  cat <<EOF
+IMPORTANT: Your previous response was invalid because it did not include a non-empty "userStories" array.
+Return ONLY valid JSON matching the required schema. Do NOT include markdown or commentary.
+You MUST include 5-15 user stories.
+
+$original_prompt
+EOF
 }
 
 ralph_prd_generator_repo_root() {
@@ -58,7 +168,7 @@ ralph_prd_generator_resolve_agent_cmd() {
 
   case "$preset" in
     codex)
-      echo "codex exec --dangerously-bypass-approvals-and-sandbox"
+      echo "codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
       ;;
     claude)
       echo "claude --dangerously-skip-permissions"
@@ -440,33 +550,54 @@ ralph_prd_generator_main() {
   local prompt
   prompt="$(ralph_prd_generator_build_prompt "$description" "$analysis" "$existing_prd" "$mode")"
 
-  # Run the agent
+  # Run the agent (retry if invalid)
   local response
-  if ! response="$(ralph_prd_generator_run_agent "$prompt")"; then
-    ralph_prd_generator_log_error "Agent failed to generate PRD"
-    return 1
-  fi
-
-  # Extract and validate JSON
-  ralph_prd_generator_log_step "Extracting and validating JSON..."
   local json
-  json="$(ralph_prd_generator_extract_json "$response")"
+  local attempts=1
+  local max_attempts="${RALPH_PRD_MAX_ATTEMPTS:-2}"
+  local allow_fallback="${RALPH_PRD_FALLBACK:-1}"
 
-  if [[ -z "$json" ]]; then
-    ralph_prd_generator_log_error "Failed to extract valid JSON from agent response"
-    echo "Raw response saved to /tmp/ralph-prd-response.txt"
-    echo "$response" > /tmp/ralph-prd-response.txt
-    return 1
-  fi
-
-  # Validate JSON structure
-  if command -v jq >/dev/null 2>&1; then
-    if ! echo "$json" | jq -e '.userStories | length > 0' >/dev/null 2>&1; then
-      ralph_prd_generator_log_error "Generated PRD has no user stories"
-      echo "$json" > /tmp/ralph-prd-invalid.json
+  while true; do
+    if ! response="$(ralph_prd_generator_run_agent "$prompt")"; then
+      ralph_prd_generator_log_error "Agent failed to generate PRD"
       return 1
     fi
 
+    # Extract and validate JSON
+    ralph_prd_generator_log_step "Extracting and validating JSON..."
+    json="$(ralph_prd_generator_extract_json "$response")"
+
+    if [[ -z "$json" ]]; then
+      ralph_prd_generator_log_error "Failed to extract valid JSON from agent response"
+      echo "Raw response saved to /tmp/ralph-prd-response.txt"
+      echo "$response" > /tmp/ralph-prd-response.txt
+      return 1
+    fi
+
+    if ralph_prd_generator_validate_json "$json"; then
+      break
+    fi
+
+    echo "$response" > /tmp/ralph-prd-response.txt
+    echo "$json" > /tmp/ralph-prd-invalid.json
+
+    if [[ "$attempts" -ge "$max_attempts" ]]; then
+      if [[ "$allow_fallback" == "1" ]]; then
+        ralph_prd_generator_log_warn "Generated PRD was invalid; falling back to template."
+        json="$(ralph_prd_generator_fallback_template "$description")"
+        break
+      fi
+      ralph_prd_generator_log_error "Generated PRD has no user stories"
+      return 1
+    fi
+
+    ralph_prd_generator_log_warn "Generated PRD was invalid; retrying with stricter prompt."
+    prompt="$(ralph_prd_generator_build_retry_prompt "$prompt")"
+    attempts=$((attempts + 1))
+  done
+
+  # Validate JSON structure
+  if command -v jq >/dev/null 2>&1; then
     # Pretty print and save
     mkdir -p "$(dirname "$output")"
     echo "$json" | jq . > "$output"
